@@ -166,6 +166,7 @@ body.touch .tr{top:calc(54px + env(safe-area-inset-top,0px))}
 #start .mp h3{margin:0 0 8px;font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:#9fe6d6}
 #start .mp small{display:block;margin-top:8px;color:#cfe6e0;font-size:12px}
 .mprow{display:flex;gap:8px;flex-wrap:wrap;justify-content:center}
+.mprow select{font:inherit;font-size:14px;background:rgba(8,16,18,.8);color:#f4f1de;border:1px solid rgba(159,230,214,.5);padding:9px 11px;flex:0 0 auto}
 .mprow input,#chatIn{font:inherit;font-size:14px;background:rgba(8,16,18,.8);color:#f4f1de;border:1px solid rgba(159,230,214,.5);padding:9px 11px;min-width:0;flex:1 1 120px;-webkit-user-select:text;user-select:text}
 #chatLog{position:fixed;left:max(14px,env(safe-area-inset-left,0px));bottom:max(64px,env(safe-area-inset-bottom,0px));z-index:6;display:flex;flex-direction:column;gap:3px;max-width:min(420px,70vw);pointer-events:none}
 #chatLog .cl{background:rgba(8,16,18,.62);padding:4px 8px;font-size:13px;color:#f4f1de;transition:opacity .5s;word-break:break-word}
@@ -210,13 +211,18 @@ body.touch .tr{top:calc(54px + env(safe-area-inset-top,0px))}
 <div id="chatLog"></div><input id="chatIn" maxlength="120" placeholder="Say something, Enter to send" autocomplete="off" style="display:none">
 <div class="overlay" id="start">
   <h1>Hollowbough</h1>
-  <p class="sub">An endless forest of tall crowns, buried light and old roots. Build a house in the branches, dig tunnels between the glades, and gather relics. Found a clan or earn a place in one.</p>
+  <p class="sub">An endless forest of tall crowns, buried light and old roots. Build a log cabin, dig tunnels between the glades, and gather relics. Found a clan or earn a place in one.</p>
+  <div class="row" id="modeMenu">
+    <button class="btn big" id="btnSolo">Solo</button>
+    <button class="btn big gold" id="btnMulti">Multiplayer</button>
+  </div>
+  <div id="soloPanel" style="display:none"><div class="mp" style="margin-top:0"><h3>Solo</h3></div>
   <div class="row">
     <button class="btn big" id="btnBegin">Begin</button>
     <button class="btn big gold" id="btnContinue" style="display:none">Continue</button>
     <button class="btn big warn" id="btnNew" style="display:none">New game</button>
-  </div>
-  <div class="mp"><h3>Multiplayer</h3><div class="mprow"><input id="mpName" maxlength="16" placeholder="Your name" autocomplete="off"><input id="mpCode" maxlength="20" placeholder="Room code" autocomplete="off"><button class="btn big" id="btnMp">Play online</button></div><small>Everyone who enters the same room code shares this forest. Your progress stays on your own device.</small></div>
+  </div><div class="row" style="margin-top:14px"><button class="btn" data-back="1">Back</button></div></div>
+  <div class="mp" id="mpPanel" style="display:none"><h3>Multiplayer</h3><div class="mprow"><input id="mpName" maxlength="16" placeholder="Your name" autocomplete="off"><button class="btn big" id="btnHost">Host game</button></div><div class="mprow" style="margin-top:8px"><input id="mpCode" maxlength="12" placeholder="Game code" autocomplete="off" style="text-transform:uppercase"><button class="btn big" id="btnMp">Join game</button></div><small>Host a game and share its code. Everyone spawns together. Multiplayer is a fresh start and does not touch your solo save. When the host leaves, the game ends.</small><div class="row" style="margin-top:12px"><button class="btn" data-back="1">Back</button></div></div>
   <div class="loading" id="loadMsg">Growing the forest</div>
   <div class="keys">
     <div><span class="kbd">WASD</span> Move</div>
@@ -356,7 +362,7 @@ function nearCamp(x,z,r){
 
 /* ===== state ===== */
 const S={
-  wood:8,relics:[],equipped:[],uid:1,collected:{},treehouses:[],hatches:[],dug:{},
+  wood:8,relics:[],equipped:[],uid:1,collected:{},treehouses:[],cabin:[],hatches:[],dug:{},
   clan:null,discovered:{},time:0.12*DAY_LEN,found:0,sleeps:0,ores:{copper:0,iron:0,gold:0,aether:0}
 };
 const ORES=[
@@ -370,8 +376,9 @@ let FX={speed:1,jump:1,glide:0,light:1,dig:1,wood:0,sense:0,wade:0,build:0};
 const SAVE_KEY='hollowbough-save-v1';
 let hasSave=false;
 function saveGame(){
+  if(G.mp)return;
   try{
-    const o={x:P.x,z:P.z,yaw:P.yaw,wood:S.wood,relics:S.relics,equipped:S.equipped,uid:S.uid,collected:S.collected,treehouses:S.treehouses,hatches:S.hatches,dug:S.dug,clan:S.clan,discovered:S.discovered,time:S.time,found:S.found,sleeps:S.sleeps,ores:S.ores};
+    const o={x:P.x,z:P.z,yaw:P.yaw,wood:S.wood,relics:S.relics,equipped:S.equipped,uid:S.uid,collected:S.collected,cabin:S.cabin.map(p=>({k:p.k,i:p.i,j:p.j,r:p.r,y:p.y})),hatches:S.hatches,dug:S.dug,clan:S.clan,discovered:S.discovered,time:S.time,found:S.found,sleeps:S.sleeps,ores:S.ores};
     localStorage.setItem(SAVE_KEY,JSON.stringify(o));
   }catch(e){}
 }
@@ -379,8 +386,10 @@ function readSave(){
   try{const raw=localStorage.getItem(SAVE_KEY);if(!raw)return null;const o=JSON.parse(raw);return o&&typeof o==='object'?o:null;}catch(e){return null;}
 }
 function applySave(o){
-  for(const k of ['wood','relics','equipped','uid','collected','treehouses','hatches','dug','clan','discovered','time','found','sleeps','ores']){if(o[k]!==undefined)S[k]=o[k];}
+  for(const k of ['wood','relics','equipped','uid','collected','cabin','hatches','dug','clan','discovered','time','found','sleeps','ores']){if(o[k]!==undefined)S[k]=o[k];}
   for(const q of ORES)if(typeof S.ores[q.id]!=='number')S.ores[q.id]=0;
+  if(Array.isArray(o.treehouses)&&o.treehouses.length){G.legacyRefund=o.treehouses.length*10;S.wood+=G.legacyRefund;}
+  S.treehouses=[];if(!Array.isArray(S.cabin))S.cabin=[];
   if(S.clan&&S.clan.kind!=='own')S.clan=null;
   if(typeof o.x==='number'&&typeof o.z==='number'){P.x=o.x;P.z=o.z;P.yaw=typeof o.yaw==='number'?o.yaw:0;P.y=terrainH(P.x,P.z)+0.2;}
 }
@@ -393,7 +402,7 @@ function clanFx(c){
   const f={speed:0.04*m,light:0.1*m};
   if(c.kind==='own'){
     f.speed+=0.06*m;f.dig=0.15*m;f.build=2;
-    if(S.treehouses.length>=3)f.wood=1;
+    if(cabinBeds()>=1)f.wood=1;
     return f;
   }
   const d=CLAN_BY_ID[c.id];if(!d)return f;
@@ -412,7 +421,7 @@ function clanBonusList(){
   if(f.jump)o.push('+'+Math.round(f.jump*100)+'% jump height');
   if(f.wood)o.push('+'+f.wood+' wood per branch');
   if(f.wade)o.push('no water slowdown');
-  if(f.build)o.push('treehouses cost '+f.build+' less wood');
+  if(f.build)o.push('cabin pieces cost less wood');
   return o;
 }
 function computeFx(){
@@ -453,7 +462,7 @@ function clanName(){return S.clan?(S.clan.kind==='own'?S.clan.name:CLAN_BY_ID[S.
 function clanEmblem(){return S.clan?(S.clan.kind==='own'?S.clan.emblem:CLAN_BY_ID[S.clan.id].emblem):0;}
 function memberCount(){
   if(!S.clan)return 0;
-  if(S.clan.kind==='own')return 1+S.treehouses.length*3+Math.floor(S.found/2);
+  if(S.clan.kind==='own')return 1+Math.min(5,cabinBeds())*3+Math.floor(S.found/2);
   return 9+((S.clan.id.length*7)%6)+Math.floor(S.found/3);
 }
 
@@ -1551,6 +1560,7 @@ function groundAt(x,z,fromY){
     const t=S.treehouses[i],dx=x-t.x,dz=z-t.z;
     if(dx*dx+dz*dz<TH_R2&&fromY>=t.py-0.45&&t.py>g)g=t.py;
   }
+  {const cy=cabinFloorY(x,z,fromY);if(cy>g)g=cy;}
   if(BR.list.length){const by=bridgeY(x,z,fromY);if(by>g)g=by;}
   for(let i=0;i<SKYFALLS.length;i++){
     const s=SKYFALLS[i],dx=x-s.cx,dz=z-s.cz;
@@ -1655,6 +1665,348 @@ function skyTick(t,dt,active){
   }
   if(P.ug)G.climb=null;
 }
+/* ===== cabins: place logs, walls, floors and a roof, and build yourself a home ===== */
+const CAB={group:new THREE.Group(),objs:new Map(),occ:new Map(),bk:new Map(),src:null,geo:{},plotsCache:null,tools:null,sel:0,on:false,ghost:null,ghostKey:'',target:null,hud:null};
+surf.add(CAB.group);
+const CAB_PIECES=[
+  {id:'wall',name:'Log wall',cost:2,key:'1'},
+  {id:'door',name:'Doorway',cost:2,key:'2'},
+  {id:'window',name:'Window wall',cost:2,key:'3'},
+  {id:'floor',name:'Plank floor',cost:1,key:'4'},
+  {id:'roof',name:'Gable roof',cost:2,key:'5'},
+  {id:'bed',name:'Bed',cost:3,key:'6'},
+  {id:'flag',name:'Banner',cost:2,key:'7'},
+  {id:'del',name:'Remove',cost:0,key:'8'}
+];
+const CAB_EDGE={wall:1,door:1,window:1};
+const cabMat=toon({vertexColors:true,side:THREE.DoubleSide});
+const glassMat=new THREE.MeshBasicMaterial({color:0xbfe8ff,transparent:true,opacity:0.32,depthWrite:false,side:THREE.DoubleSide});
+const BARK=[0x8a5a34,0x7d4f2c,0x946239,0x84552f],ENDC=0xdcb67e;
+function cabCost(id){const b=CAB_PIECES.find(q=>q.id===id).cost;if(!b)return 0;return Math.max(1,Math.round(b*(1-Math.min(0.5,0.08*FX.build))));}
+function cabinBeds(){let n=0;for(const p of S.cabin)if(p.k==='bed')n++;return n;}
+function pPos(p){
+  if(CAB_EDGE[p.k])return p.r===0?{x:p.i*2+1,z:p.j*2}:{x:p.i*2,z:p.j*2+1};
+  return {x:p.i*2+1,z:p.j*2+1};
+}
+function slotKey(k,i,j,r){
+  if(CAB_EDGE[k])return 'e'+i+','+j+','+r;
+  if(k==='floor')return 'f'+i+','+j;
+  if(k==='roof')return 'R'+i+','+j;
+  return 'o'+i+','+j;
+}
+function bkKey(x,z){return Math.floor(x/10)+','+Math.floor(z/10);}
+function indexAdd(p){
+  p._pos=pPos(p);CAB.occ.set(slotKey(p.k,p.i,p.j,p.r),p);
+  const k=bkKey(p._pos.x,p._pos.z);let a=CAB.bk.get(k);if(!a){a=[];CAB.bk.set(k,a);}a.push(p);
+}
+function indexDel(p){
+  CAB.occ.delete(slotKey(p.k,p.i,p.j,p.r));
+  const a=CAB.bk.get(bkKey(p._pos.x,p._pos.z));if(a){const n=a.indexOf(p);if(n>=0)a.splice(n,1);}
+}
+function nearPieces(x,z,rad){
+  const out=[],c0=Math.floor((x-rad)/10),c1=Math.floor((x+rad)/10),d0=Math.floor((z-rad)/10),d1=Math.floor((z+rad)/10);
+  for(let a=c0;a<=c1;a++)for(let b=d0;b<=d1;b++){const l=CAB.bk.get(a+','+b);if(l)for(const p of l)out.push(p);}
+  return out;
+}
+/* ---- geometry ---- */
+function logParts(axis,len,rad,cx,cy,cz,bark,end){
+  const side=new THREE.CylinderGeometry(rad,rad,len,8,1,true);
+  const t=new THREE.CircleGeometry(rad,8).rotateX(-Math.PI/2).translate(0,len/2,0);
+  const b=new THREE.CircleGeometry(rad,8).rotateX(Math.PI/2).translate(0,-len/2,0);
+  const gs=[side,t,b];
+  gs.forEach(g=>{if(axis==='x')g.rotateZ(Math.PI/2);else if(axis==='z')g.rotateX(Math.PI/2);g.translate(cx,cy,cz);});
+  return [{geo:side,color:bark},{geo:t,color:end},{geo:b,color:end}];
+}
+function boxPart(w,h,d,x,y,z,color){return {geo:new THREE.BoxGeometry(w,h,d).translate(x,y,z),color:color};}
+function triGeo(tris){
+  const pos=[];for(const t of tris)for(const v of t)pos.push(v[0],v[1],v[2]);
+  const g=new THREE.BufferGeometry();g.setAttribute('position',new THREE.Float32BufferAttribute(pos,3));g.computeVertexNormals();return g;
+}
+function pieceItems(k,clanCol){
+  const it=[];
+  const rows=[-0.3,0.3,0.9,1.5,2.1];
+  if(k==='wall'){
+    rows.forEach((y,n)=>it.push(...logParts('x',2.5,0.3,0,y,0,BARK[n%4],ENDC)));
+  }else if(k==='door'){
+    for(const sx of [-0.85,0.85])it.push(...logParts('y',2.4,0.3,sx,1.2,0,BARK[sx>0?1:2],ENDC));
+    it.push(...logParts('x',2.5,0.3,0,2.1,0,BARK[0],ENDC));
+    it.push(...logParts('x',1.5,0.14,0,0.12,0,BARK[3],ENDC)); // threshold
+  }else if(k==='window'){
+    for(const n of [0,1,4])it.push(...logParts('x',2.5,0.3,0,rows[n],0,BARK[n%4],ENDC));
+    for(const n of [2,3])for(const sx of [-0.85,0.85])it.push(...logParts('x',0.8,0.3,sx,rows[n],0,BARK[n%4],ENDC));
+    it.push(boxPart(1.0,0.07,0.5,0,0.58,0.1,0xb9824f),boxPart(1.2,0.08,0.12,0,1.82,0,0x6b4426));
+  }else if(k==='floor'){
+    for(let n=0;n<4;n++)it.push(boxPart(2.0,0.14,0.5,0,0.07,-0.75+n*0.5,n%2?0xc9985e:0xb98a52));
+    it.push(boxPart(1.9,1.0,1.9,0,-0.5,0,0x6b4a2f));
+  }else if(k==='roof'){
+    const hx=1.25,hz=1.45,y0=2.4,y1=3.55;
+    const A=[-hx,y0,-hz],B=[hx,y0,-hz],C=[hx,y0,hz],D=[-hx,y0,hz],R1=[-hx,y1,0],R2=[hx,y1,0];
+    it.push({geo:triGeo([[A,B,R2],[A,R2,R1]]),color:0x9a4a38},{geo:triGeo([[D,R2,C],[D,R1,R2]]),color:0x8a3f2f});
+    it.push({geo:triGeo([[A,R1,D]]),color:0xc9985e},{geo:triGeo([[B,C,R2]]),color:0xc9985e});
+    it.push(...logParts('x',2.7,0.12,0,y1,0,BARK[0],ENDC));
+  }else if(k==='bed'){
+    const bc=clanCol?new THREE.Color(clanCol).getHex():0xd1694a;
+    it.push(boxPart(1.0,0.28,1.95,0,0.3,0,0x7b5a3a),boxPart(0.9,0.2,1.8,0,0.54,0,0xf0e2c4),boxPart(0.92,0.1,1.0,0,0.68,0.35,bc),boxPart(0.6,0.14,0.45,0,0.7,-0.65,0xffffff));
+    for(const sx of [-0.45,0.45])for(const sz of [-0.9,0.9])it.push(boxPart(0.12,0.3,0.12,sx,0.15,sz,0x5b4026));
+    it.push(boxPart(1.0,0.7,0.1,0,0.65,-0.98,0x6b4426));
+  }else if(k==='flag'){
+    it.push(...logParts('y',3.2,0.07,0,1.6,0,BARK[1],ENDC),boxPart(0.4,0.12,0.4,0,0.06,0,0x6b4a2f));
+  }
+  return it;
+}
+function pieceMeshGeo(k,clanCol){
+  const key=k+(k==='bed'?clanCol:'');
+  if(CAB.geo[key])return CAB.geo[key];
+  return CAB.geo[key]=mergeColored(pieceItems(k,clanCol));
+}
+function makePieceObj(p,ghostMat){
+  const g=new THREE.Group();
+  const cc=S.clan?clanColor():null;
+  const m=new THREE.Mesh(pieceMeshGeo(p.k,cc),ghostMat||cabMat);
+  if(!ghostMat){m.castShadow=true;m.receiveShadow=true;}
+  g.add(m);
+  if(p.k==='window'){
+    const gl=new THREE.Mesh(new THREE.PlaneGeometry(1.0,1.2),ghostMat||glassMat);gl.position.set(0,1.2,0);g.add(gl);
+  }
+  if(p.k==='flag'){
+    const fm=ghostMat||new THREE.MeshBasicMaterial({map:flagTexture(cc||'#6fae5a',S.clan?clanEmblem():0),side:THREE.DoubleSide});
+    const fl=new THREE.Mesh(new THREE.PlaneGeometry(0.9,1.35),fm);fl.position.set(0.5,2.4,0);fl.userData.flag=true;g.add(fl);
+  }
+  g.rotation.y=(p.k==='bed'?(p.r===0?Math.PI/2:0):(p.k==='roof'?(p.r===1?Math.PI/2:0):(p.r===1?Math.PI/2:0)));
+  if(p.k==='flag')g.rotation.y=0;
+  const pos=pPos(p);g.position.set(pos.x,p.y+(p.k==='bed'?0.14:0),pos.z);
+  return g;
+}
+function addPieceObj(p){
+  const o=makePieceObj(p);CAB.group.add(o);CAB.objs.set(p,o);
+}
+function removePieceObj(p){
+  const o=CAB.objs.get(p);if(!o)return;CAB.group.remove(o);
+  o.traverse(c=>{if(c.userData.flag&&c.material){if(c.material.map&&false)c.material.map.dispose();c.material.dispose();if(c.geometry)c.geometry.dispose();}if(c.isMesh&&c.geometry&&(c.geometry.type==='PlaneGeometry'))c.geometry.dispose();});
+  CAB.objs.delete(p);
+}
+function cabinReload(){
+  for(const p of [...CAB.objs.keys()])removePieceObj(p);
+  CAB.occ.clear();CAB.bk.clear();CAB.plotsCache=null;
+  if(!Array.isArray(S.cabin))S.cabin=[];
+  for(const p of S.cabin){indexAdd(p);addPieceObj(p);}
+  CAB.src=S.cabin;
+}
+function rebuildCabinFlags(){
+  CAB.geo={};
+  for(const p of S.cabin){if(p.k==='bed'||p.k==='flag'){removePieceObj(p);addPieceObj(p);}}
+}
+/* ---- plots (groups of pieces) for the map ---- */
+function cabinPlots(){
+  if(CAB.plotsCache&&CAB.plotsCache.n===S.cabin.length)return CAB.plotsCache.list;
+  const list=[];
+  for(const p of S.cabin){
+    const q=p._pos||pPos(p);let f=null;
+    for(const pl of list){if(Math.hypot(pl.x-q.x,pl.z-q.z)<14){f=pl;break;}}
+    if(f){f.n++;f.sx+=q.x;f.sz+=q.z;f.x=f.sx/f.n;f.z=f.sz/f.n;}else list.push({x:q.x,z:q.z,sx:q.x,sz:q.z,n:1});
+  }
+  CAB.plotsCache={n:S.cabin.length,list:list};return list;
+}
+function cabinNear(r){
+  for(const p of nearPieces(P.x,P.z,r)){const q=p._pos;if(Math.hypot(q.x-P.x,q.z-P.z)<r)return true;}
+  return false;
+}
+/* ---- collision and floors ---- */
+function cabinCollide(){
+  const near=nearPieces(P.x,P.z,4);
+  for(const p of near){
+    if(P.y<p.y-1.2||P.y>p.y+2.4)continue;
+    const q=p._pos;
+    if(CAB_EDGE[p.k]){
+      if(p.k==='door'){
+        for(const s of [-0.85,0.85]){
+          const cx=p.r===0?q.x+s:q.x,cz=p.r===0?q.z:q.z+s,r=0.5;
+          let ax=P.x-cx,az=P.z-cz;const d2=ax*ax+az*az;
+          if(d2<r*r){const d=Math.sqrt(d2)||0.0001;P.x=cx+ax/d*r;P.z=cz+az/d*r;}
+        }
+      }else{
+        const ax0=p.r===0?q.x-1.1:q.x,az0=p.r===0?q.z:q.z-1.1,ax1=p.r===0?q.x+1.1:q.x,az1=p.r===0?q.z:q.z+1.1;
+        const dx=ax1-ax0,dz=az1-az0,l2=dx*dx+dz*dz;let t=((P.x-ax0)*dx+(P.z-az0)*dz)/l2;t=Math.max(0,Math.min(1,t));
+        const cx=ax0+dx*t,cz=az0+dz*t;let ex=P.x-cx,ez=P.z-cz;const d2=ex*ex+ez*ez,r=0.55;
+        if(d2<r*r){const d=Math.sqrt(d2);if(d<0.0002){ex=p.r===0?0:1;ez=p.r===0?1:0;P.x=cx+ex*r;P.z=cz+ez*r;}else{P.x=cx+ex/d*r;P.z=cz+ez/d*r;}}
+      }
+    }else if(p.k==='bed'){
+      for(const s of [-0.55,0.55]){
+        const cx=p.r===0?q.x+s:q.x,cz=p.r===0?q.z:q.z+s,r=0.65;
+        let ax=P.x-cx,az=P.z-cz;const d2=ax*ax+az*az;
+        if(d2<r*r){const d=Math.sqrt(d2)||0.0001;P.x=cx+ax/d*r;P.z=cz+az/d*r;}
+      }
+    }else if(p.k==='flag'){
+      const r=0.4;let ax=P.x-q.x,az=P.z-q.z;const d2=ax*ax+az*az;
+      if(d2<r*r){const d=Math.sqrt(d2)||0.0001;P.x=q.x+ax/d*r;P.z=q.z+az/d*r;}
+    }
+  }
+}
+function cabinFloorY(x,z,fromY){
+  const f=CAB.occ.get('f'+Math.floor(x/2)+','+Math.floor(z/2));
+  if(!f)return -1e9;
+  const top=f.y+0.14;
+  return fromY>=top-0.6?top:-1e9;
+}
+/* ---- aiming and placement ---- */
+function cabAim(){
+  const cp=Math.cos(P.pitch),dx=-Math.sin(P.yaw)*cp,dy=Math.sin(P.pitch),dz=-Math.cos(P.yaw)*cp;
+  const ex=P.x,ey=P.y+EYE,ez=P.z;
+  let hx=ex+dx*9,hz=ez+dz*9,hy=0;
+  for(let t=1.0;t<=9;t+=0.2){
+    const x=ex+dx*t,y=ey+dy*t,z=ez+dz*t,g=groundAt(x,z,y+0.5);
+    if(y<=g+0.05){hx=x;hz=z;hy=g;break;}
+    hx=x;hz=z;hy=g;
+  }
+  return {x:hx,z:hz,y:hy};
+}
+function cabSnap(kind,h){
+  const i0=Math.floor(h.x/2),j0=Math.floor(h.z/2);
+  if(CAB_EDGE[kind]){
+    const fx=h.x-i0*2,fz=h.z-j0*2;
+    const c=[[fz,i0,j0,0],[2-fz,i0,j0+1,0],[fx,i0,j0,1],[2-fx,i0+1,j0,1]];
+    c.sort((a,b)=>a[0]-b[0]);return {i:c[0][1],j:c[0][2],r:c[0][3]};
+  }
+  const r=Math.abs(Math.cos(P.yaw))>=Math.abs(Math.sin(P.yaw))?1:0;
+  return {i:i0,j:j0,r:r};
+}
+function plotLevel(x,z){
+  let best=null,bd=14;
+  for(const p of nearPieces(x,z,14)){const d=Math.hypot(p._pos.x-x,p._pos.z-z);if(d<bd&&p.k!=='bed'){bd=d;best=p;}}
+  return best?best.y:Math.round(terrainH(x,z)*10)/10;
+}
+function cabCheck(kind,s){
+  const p={k:kind,i:s.i,j:s.j,r:s.r},pos=pPos(p);
+  if(S.cabin.length>=500)return {ok:false,why:'Cabin size limit reached.'};
+  if(CAB.occ.has(slotKey(kind,s.i,s.j,s.r)))return {ok:false,why:'Something is already there.'};
+  const h=terrainH(pos.x,pos.z);
+  if(h<WATER_Y+0.5)return {ok:false,why:'Too wet to build.'};
+  for(const sf of SKYFALLS)if(Math.hypot(sf.bx-pos.x,sf.bz-pos.z)<9)return {ok:false,why:'Too close to a waterfall.'};
+  for(const q of S.hatches)if(Math.hypot(q.x-pos.x,q.z-pos.z)<4)return {ok:false,why:'Too close to a tunnel entrance.'};
+  let y=plotLevel(pos.x,pos.z);
+  if(kind==='bed'){
+    const fl=CAB.occ.get('f'+s.i+','+s.j);if(!fl)return {ok:false,why:'Lay a plank floor first.'};
+    y=fl.y;
+  }
+  if(Math.abs(h-y)>(kind==='floor'?1.3:1.9))return {ok:false,why:'The ground is too uneven here.'};
+  if(CAB_EDGE[kind]||kind==='bed'||kind==='flag'){
+    const d=Math.hypot(P.x-pos.x,P.z-pos.z);
+    if(d<(CAB_EDGE[kind]?1.0:1.1)&&Math.abs(P.y-y)<2)return {ok:false,why:'Step back first.'};
+  }
+  return {ok:true,y:y,pos:pos};
+}
+function cabNearestPiece(h){
+  let best=null,bd=2.3;
+  for(const p of nearPieces(h.x,h.z,3)){
+    const q=p._pos,d=Math.hypot(q.x-h.x,q.z-h.z)+(p.k==='roof'?0.6:0)+(p.k==='floor'?0.3:0);
+    if(d<bd){bd=d;best=p;}
+  }
+  return best;
+}
+function placePiece(){
+  if(!CAB.on||G.mode!=='play'||G.busy||P.ug)return;
+  const tool=CAB_PIECES[CAB.sel],h=cabAim();
+  if(tool.id==='del'){
+    const p=cabNearestPiece(h);if(!p){toast('Aim at a piece to remove it.','warn');return;}
+    const refund=cabRefund(p.k);
+    indexDel(p);removePieceObj(p);S.cabin.splice(S.cabin.indexOf(p),1);CAB.plotsCache=null;
+    S.wood+=refund;renderHud();saveGame();Sfx.pick&&Sfx.pick();
+    toast('Removed '+CAB_PIECES.find(q=>q.id===p.k).name.toLowerCase()+'. '+refund+' wood back.');return;
+  }
+  const s=cabSnap(tool.id,h),c=cabCheck(tool.id,s);
+  if(!c.ok){toast(c.why,'warn');return;}
+  const cost=cabCost(tool.id);
+  if(S.wood<cost){toast('Needs '+cost+' wood. You have '+S.wood+'.','warn');return;}
+  S.wood-=cost;
+  const p={k:tool.id,i:s.i,j:s.j,r:s.r,y:c.y};
+  S.cabin.push(p);indexAdd(p);addPieceObj(p);CAB.plotsCache=null;
+  renderHud();saveGame();Sfx.build();
+  if(tool.id==='bed'&&cabinBeds()===1)toast('Your bed is set. Press E beside it to sleep, and R recalls you here.','gold');
+}
+function cabRefund(k){return CAB_PIECES.find(q=>q.id===k).cost;}
+/* ---- build mode ---- */
+function ghostMaterial(ok){return new THREE.MeshBasicMaterial({color:ok?0x7dff9a:0xff6a5a,transparent:true,opacity:0.42,depthWrite:false,side:THREE.DoubleSide});}
+const GH_OK=ghostMaterial(true),GH_BAD=ghostMaterial(false);
+function setGhost(p,ok){
+  const key=p?p.k+'|'+p.i+'|'+p.j+'|'+p.r+'|'+p.y+'|'+(ok?1:0):'';
+  if(key===CAB.ghostKey)return;
+  CAB.ghostKey=key;
+  if(CAB.ghost){surf.remove(CAB.ghost);CAB.ghost.traverse(c=>{if(c.isMesh&&c.geometry&&c.geometry.type==='PlaneGeometry')c.geometry.dispose();});CAB.ghost=null;}
+  if(!p)return;
+  const g=makePieceObj(p,ok?GH_OK:GH_BAD);surf.add(g);CAB.ghost=g;
+}
+function cabHud(){
+  if(CAB.hud)return CAB.hud;
+  const d=document.createElement('div');d.id='cabHud';
+  d.style.cssText='position:fixed;left:50%;transform:translateX(-50%);bottom:max(18px,env(safe-area-inset-bottom,0px));z-index:6;display:none;flex-direction:column;align-items:center;gap:6px;pointer-events:none;max-width:96vw';
+  d.innerHTML='<div id="cabTools" style="display:flex;gap:4px;flex-wrap:wrap;justify-content:center"></div><div id="cabInfo" class="chip" style="font-size:12px"></div>';
+  document.body.appendChild(d);CAB.hud=d;
+  return d;
+}
+function updateCabHud(info){
+  const d=cabHud(),tools=d.firstElementChild;
+  if(!CAB.tools){
+    tools.innerHTML=CAB_PIECES.map((p,i)=>'<div class="chip" data-i="'+i+'" style="padding:4px 8px;font-size:11px;gap:5px"><b>'+p.key+'</b><small>'+p.name+(p.cost?' '+p.cost:'')+'</small></div>').join('');CAB.tools=true;
+  }
+  [...tools.children].forEach((c,i)=>{c.style.outline=i===CAB.sel?'2px solid #7fe6d6':'none';c.style.opacity=i===CAB.sel?1:0.7;
+    const p=CAB_PIECES[i];if(p.cost){const cc=cabCost(p.id);c.lastChild.textContent=p.name+' '+cc;}});
+  $('cabInfo').textContent=info;
+}
+function toggleBuild(){
+  if(G.mode!=='play'||P.ug){if(CAB.on)CAB.on=false;return;}
+  CAB.on=!CAB.on;
+  if(CAB.on)toast('Build mode. Aim at the ground. E or click places, Q or wheel changes piece, B exits.');
+  cabHud().style.display=CAB.on?'flex':'none';
+  const nb=$('cabNext'),pb=$('cabBtn');if(nb)nb.style.display=CAB.on?'grid':'none';
+  if(!CAB.on)setGhost(null);
+}
+function cabCycle(d){CAB.sel=(CAB.sel+d+CAB_PIECES.length)%CAB_PIECES.length;CAB.ghostKey='';}
+function cabSelect(n){if(n>=0&&n<CAB_PIECES.length){CAB.sel=n;CAB.ghostKey='';}}
+function cabinTick(dt,t){
+  if(CAB.src!==S.cabin)cabinReload();
+  if(G.legacyRefund){const n=G.legacyRefund;G.legacyRefund=0;toast('Treehouses are gone. You got '+n+' wood back to build a cabin with.','gold');}
+  if(CAB.on&&(G.mode==='menu'||P.ug)){CAB.on=false;cabHud().style.display='none';setGhost(null);const nb=$('cabNext');if(nb)nb.style.display='none';}
+  if(!CAB.on){if(CAB.ghost)setGhost(null);if(CAB.hud&&CAB.hud.style.display!=='none')CAB.hud.style.display='none';return;}
+  if(G.mode!=='play'){setGhost(null);return;}
+  const tool=CAB_PIECES[CAB.sel],h=cabAim();
+  if(tool.id==='del'){
+    const p=cabNearestPiece(h);
+    if(p){setGhost({k:p.k,i:p.i,j:p.j,r:p.r,y:p.y},false);updateCabHud('Remove: '+CAB_PIECES.find(q=>q.id===p.k).name+'. '+cabRefund(p.k)+' wood back. E or click.');}
+    else{setGhost(null);updateCabHud('Remove: aim at a piece.');}
+    return;
+  }
+  const s=cabSnap(tool.id,h),c=cabCheck(tool.id,s),cost=cabCost(tool.id);
+  CAB.target=c;
+  setGhost({k:tool.id,i:s.i,j:s.j,r:s.r,y:c.ok?c.y:plotLevel(pPos({k:tool.id,i:s.i,j:s.j,r:s.r}).x,pPos({k:tool.id,i:s.i,j:s.j,r:s.r}).z)},c.ok&&S.wood>=cost);
+  updateCabHud(tool.name+' ('+cost+' wood, you have '+S.wood+')'+(c.ok?(S.wood>=cost?'  E or click to place':'  Need more wood'):'  '+c.why));
+}
+/* ---- interaction ---- */
+function cabinPrompt(){
+  if(CAB.on)return null;
+  for(const p of nearPieces(P.x,P.z,4)){
+    if(p.k!=='bed')continue;
+    const q=p._pos;
+    if(Math.hypot(P.x-q.x,P.z-q.z)<2.4&&Math.abs(P.y-p.y)<2.5){
+      const night=SKY_NOW.elev<0.1;
+      return {label:night?'Sleep until dawn':'Rest until evening',ok:true,run:()=>sleepAt(night)};
+    }
+  }
+  return null;
+}
+function nearestBed(){
+  let best=null,bd=1e9;
+  for(const p of S.cabin){if(p.k!=='bed')continue;const q=p._pos||pPos(p),d=Math.hypot(q.x-P.x,q.z-P.z);if(d<bd){bd=d;best=p;}}
+  return best;
+}
+/* touch buttons */
+(function(){
+  const mk=(id,txt,style,fn)=>{const b=document.createElement('button');b.className='tbtn';b.id=id;b.textContent=txt;b.style.cssText=style;b.style.fontSize='11px';
+    b.addEventListener('touchstart',e=>{e.preventDefault();fn();},{passive:false});b.addEventListener('mousedown',e=>{e.preventDefault();fn();});$('touch').appendChild(b);return b;};
+  mk('cabBtn','Build','left:max(14px,env(safe-area-inset-left,0px));bottom:calc(190px + env(safe-area-inset-bottom,0px))',toggleBuild);
+  const nx=mk('cabNext','Next','left:max(14px,env(safe-area-inset-left,0px));bottom:calc(260px + env(safe-area-inset-bottom,0px));display:none',()=>cabCycle(1));
+  nx.style.display='none';
+})();
+window.addEventListener('wheel',e=>{if(CAB.on&&G.mode==='play'){e.preventDefault();cabCycle(e.deltaY>0?1:-1);}},{passive:false});
 
 /* ===== underground ===== */
 const UG={group:new THREE.Group(),mesh:null,cryst:null,cx:-9999,cz:-9999,dirty:true,relics:new Map(),hatchObjs:new Map(),glints:[],debris:[],sig:''};
@@ -1983,6 +2335,7 @@ function resolveSolids(){
     const sf=SKYFALLS[i];if(Math.abs(P.y-sf.top)>10||Math.hypot(P.x-sf.cx,P.z-sf.cz)>sf.R+3)continue;
     for(const s of sf.solids){let ax=P.x-s.x,az=P.z-s.z;const d2=ax*ax+az*az;if(d2<s.r*s.r){const d=Math.sqrt(d2)||0.0001;P.x=s.x+ax/d*s.r;P.z=s.z+az/d*s.r;}}
   }
+  cabinCollide();
   for(const t of S.treehouses){
     if(Math.abs(P.x-t.x)>6||Math.abs(P.z-t.z)>6)continue;
     if(P.y<t.py-1||P.y>t.py+3.2)continue;
@@ -2105,16 +2458,7 @@ function scanInteract(){
     return null;
   }
   const skp=skyPrompt();if(skp)return skp;
-  const plat=onPlatform();
-  if(plat){
-    const bx=plat.x+TH_BED[0],bz=plat.z+TH_BED[1];
-    if(Math.hypot(P.x-bx,P.z-bz)<2.1){
-      const night=SKY_NOW.elev<0.1;
-      return {label:night?'Sleep until dawn':'Rest until evening',ok:true,run:()=>sleepAt(night)};
-    }
-    if(Math.hypot(P.x-plat.x,P.z-(plat.z+plat.r+1.0))<2.0)return {label:'Climb down the ladder',ok:true,run:()=>climbDown(plat)};
-    return null;
-  }
+  const cbp=cabinPrompt();if(cbp)return cbp;
   const camp=findCamp();
   if(camp&&Math.hypot(P.x-camp.bx,P.z-camp.bz)<7.5){
     return {label:'Speak with '+camp.clan.elder+' of '+camp.clan.name,ok:true,run:()=>{G.clanFocus=camp.clan.id;openPanel('clan');}};
@@ -2122,19 +2466,11 @@ function scanInteract(){
   for(const h of S.hatches){
     if(Math.hypot(P.x-h.x,P.z-h.z)<3.1&&Math.abs(P.y-terrainH(h.x,h.z))<3.4)return {label:'Descend into the tunnels',ok:true,run:()=>enterUG(h)};
   }
-  const tr=nearestTreeInView();
-  if(tr){
-    const ex=S.treehouses.find(t=>t.id===tr.id);
-    if(ex)return {label:'Climb up to your treehouse',ok:true,run:()=>climbUp(ex)};
-    if(tr.r<0.5)return {label:'This trunk is too thin for a treehouse',ok:false,dim:true,run:()=>{}};
-    if(thTooClose(tr))return {label:'Too close to another treehouse',ok:false,dim:true,run:()=>{}};
-    const cost=treehouseCost();
-    return {label:'Build a treehouse',need:cost+' wood',ok:S.wood>=cost,short:S.wood<cost?'Need '+cost+' wood, you have '+S.wood:'',run:()=>buildTreehouse(tr)};
-  }
   return null;
 }
 function doInteract(){
   if(G.mode!=='play'||G.busy)return;
+  if(CAB.on){placePiece();return;}
   const it=G.interact||scanInteract();
   if(!it)return;
   if(!it.ok){if(it.short)toast(it.short,'warn');return;}
@@ -2217,8 +2553,9 @@ function tryRecall(){
   if(G.recallCd>0){toast('Recall ready in '+Math.ceil(G.recallCd)+' s.','warn');return;}
   let dest=null;
   if(S.clan.kind==='own'){
-    let bd=1e9;for(const t of S.treehouses){const d=Math.hypot(t.x-P.x,t.z-P.z);if(d<bd){bd=d;dest={x:t.x,z:t.z+3.0,y:t.py};}}
-    if(!dest){toast('Build a treehouse first. It becomes your clan hall.','warn');return;}
+    const bd=nearestBed();
+    if(!bd){toast('Build a bed in your cabin first. It becomes your clan hall.','warn');return;}
+    const q=bd._pos;dest={x:q.x+(bd.r===0?0:1.3),z:q.z+(bd.r===0?1.3:0),y:bd.y+0.2};
   }else{const c=CLAN_BY_ID[S.clan.id];dest={x:c.camp[0]+3.5,z:c.camp[1]+3.5,y:c.y};}
   G.recallCd=90;
   fadeThen(()=>{P.x=dest.x;P.z=dest.z;P.y=dest.y;P.vy=0;P.vx=0;P.vz=0;updateChunks(true);P.y=Math.max(dest.y,terrainH(P.x,P.z));toast('You return to the hall of '+clanName()+'.');});
@@ -2327,7 +2664,7 @@ function renderOres(){
 }
 function oreTotalValue(){let v=0;for(const o of ORES)v+=(S.ores[o.id]|0)*o.value;return v;}
 function sellOres(){
-  if(!G.atCamp){toast('Trade ore at one of your treehouses.','warn');return;}
+  if(!G.atCamp){toast('Trade ore inside your cabin, near a bed.','warn');return;}
   const v=oreTotalValue();if(v<=0){toast('You carry no ore.','warn');return;}
   S.wood+=v;for(const o of ORES)S.ores[o.id]=0;
   Sfx.relic(0);toast('Your clan trades the ore for '+v+' wood.','gold');renderHud();saveGame();
@@ -2397,7 +2734,7 @@ function drawMarkers(g,cx,cy,scale,wx,wz,rimR,labels){
     g.fillStyle=q.c||'#ffffff';g.strokeStyle='#0a1517';g.lineWidth=2;g.beginPath();g.arc(p[0],p[1],5,0,Math.PI*2);g.fill();g.stroke();
     if(labels){g.fillStyle='#fff';g.font='700 12px Mulish,sans-serif';g.textAlign='center';g.fillText(q.n,p[0],p[1]-10);}
   }
-  for(const t of S.treehouses){
+  for(const t of cabinPlots()){
     const p=put(t.x,t.z,true);if(!p)continue;
     g.fillStyle='#f2c76b';g.strokeStyle='#0a1517';g.lineWidth=2;
     g.beginPath();g.moveTo(p[0],p[1]-7);g.lineTo(p[0]+6,p[1]-1);g.lineTo(p[0]+4,p[1]-1);g.lineTo(p[0]+4,p[1]+5);g.lineTo(p[0]-4,p[1]+5);g.lineTo(p[0]-4,p[1]-1);g.lineTo(p[0]-6,p[1]-1);g.closePath();g.fill();g.stroke();
@@ -2472,14 +2809,14 @@ function renderBigMap(){
     }
     legend.push('<span><i style="background:#9c8b73"></i>Dug tunnel</span>','<span><i style="background:#fff0b8"></i>Entrance</span>');
   }else{
-    $('mapTitle').textContent='Forest map';$('mapSub').textContent='North is up. Your treehouses are gold. Skyfalls are blue.';
+    $('mapTitle').textContent='Forest map';$('mapSub').textContent='North is up. Your cabins are gold. Skyfalls are blue.';
     const ppu=0.9,step=8;
     for(let py=0;py<W;py+=step)for(let px=0;px<W;px+=step){
       mapRGB(P.x+(px+step/2-c)/ppu,P.z+(py+step/2-c)/ppu,step/ppu,_rgb);
       g.fillStyle='rgb('+(_rgb[0]|0)+','+(_rgb[1]|0)+','+(_rgb[2]|0)+')';g.fillRect(px,py,step,step);
     }
     drawMarkers(g,c,c,ppu,P.x,P.z,c-16,true);
-    legend.push('<span><i style="background:#8fdcff;border-radius:50%"></i>Skyfall</span>','<span><i style="background:#f2c76b"></i>Treehouse</span>','<span><i style="background:transparent;border:2px solid #7fe6d6;border-radius:50%"></i>Tunnel entrance</span>');
+    legend.push('<span><i style="background:#8fdcff;border-radius:50%"></i>Skyfall</span>','<span><i style="background:#f2c76b"></i>Cabin</span>','<span><i style="background:transparent;border:2px solid #7fe6d6;border-radius:50%"></i>Tunnel entrance</span>');
     if(FX.sense>0)legend.push('<span><i style="background:#ff8fb8;border-radius:50%"></i>Relic sensed</span>');
   }
   g.save();g.translate(c,c);g.rotate(-P.yaw);g.fillStyle='#fff';g.strokeStyle='#0a1517';g.lineWidth=2;
@@ -2517,12 +2854,12 @@ function renderClan(){
   const el=$('clanBody'),focus=G.clanFocus;
   const nearId=G.atCamp;
   let h='<button class="btn close" data-close="1" aria-label="Close">&times;</button><h2>Clans</h2>';
-  h+='<p class="lede">Found a clan of your own. Members call out relics and lend you their strengths, and your banner flies from every treehouse you build.</p>';
+  h+='<p class="lede">Found a clan of your own. Members call out relics and lend you their strengths, and your banner flies from your cabin.</p>';
   {
     const tv=oreTotalValue();
     h+='<h3>Ore</h3><div class="card"><div class="meta">'+ORES.map(o=>'<b style="color:'+o.css+'">'+o.name+'</b> '+(S.ores[o.id]|0)+' ('+o.value+' wood each)').join(' &middot; ')+'</div>';
-    h+='<div class="meta">Mine ore from tunnel walls. Your treehouses buy it for wood.</div>';
-    h+='<button class="btn" data-act="sell"'+(tv>0&&nearId?'':' disabled')+'>Trade all ore for '+tv+' wood'+(nearId?'':' (stand near a treehouse)')+'</button></div>';
+    h+='<div class="meta">Mine ore from tunnel walls. Your cabin buys it for wood.</div>';
+    h+='<button class="btn" data-act="sell"'+(tv>0&&nearId?'':' disabled')+'>Trade all ore for '+tv+' wood'+(nearId?'':' (stand in your cabin)')+'</button></div>';
   }
   if(S.clan){
     const own=S.clan.kind==='own',cl=own?null:CLAN_BY_ID[S.clan.id];
@@ -2531,13 +2868,13 @@ function renderClan(){
     h+='<div class="meta"><b>Perk:</b> '+(own?"Founder's Vigor":esc(cl.perk))+'</div>';
     h+='<div class="meta"><b>Active bonuses:</b> '+clanBonusList().join(', ')+'</div>';
     h+='<div class="meta"><i>Bonuses grow with rank (Initiate x1, Ranger x1.25, Warden x1.5, Elder x2). Rank rises as you find relics.</i></div>';
-    if(own)h+='<div class="meta">Halls: '+S.treehouses.length+' treehouse'+(S.treehouses.length===1?'':'s')+'. New members arrive as you build and explore.</div>';
+    if(own)h+='<div class="meta">Beds in your cabin: '+cabinBeds()+'. New members arrive as you build and explore.</div>';
     else h+='<div class="meta"><i>'+esc(cl.motto)+'</i></div>';
     h+='<div class="acts"><button class="btn" data-act="recall">Recall to hall</button><button class="btn warn" data-act="leave">Leave clan</button></div></div></div>';
   }
   const canFound=S.wood>=8&&UI.found.name.trim().length>=3;
   h+='<h3>'+(S.clan&&S.clan.kind==='own'?'Refound your clan':'Found your own clan')+'</h3>';
-  h+='<p>Costs 8 wood. Your banner flies from every treehouse you build, and your hall grows with you.'+(S.clan&&S.clan.kind!=='own'?' Founding a clan leaves your current one.':'')+'</p>';
+  h+='<p>Costs 8 wood. Your banner flies from your cabin, and your hall grows with you.'+(S.clan&&S.clan.kind!=='own'?' Founding a clan leaves your current one.':'')+'</p>';
   h+='<div class="field"><label for="clanName">Clan name</label><input type="text" id="clanName" maxlength="24" autocomplete="off" placeholder="Hollowbough Wardens" value="'+esc(UI.found.name)+'"></div>';
   h+='<div class="field"><label>Banner colour</label><div class="swatches">';
   OWN_COLORS.forEach((c,i)=>{h+='<button class="swatch'+(UI.found.color===i?' sel':'')+'" data-act="swatch:'+i+'" style="background:'+c+'" aria-label="Colour '+(i+1)+'"></button>';});
@@ -2550,13 +2887,13 @@ function renderClan(){
 }
 function leaveClan(){
   if(!S.clan)return;
-  const n=clanName();S.clan=null;computeFx();rebuildTreehouseMeshes();renderHud();saveGame();toast('You left '+n+'.');
+  const n=clanName();S.clan=null;computeFx();rebuildCabinFlags();renderHud();saveGame();toast('You left '+n+'.');
 }
 function joinClan(id){
   const c=CLAN_BY_ID[id];
   if(!c||G.atCamp!==id){toast('Visit their camp to join.','warn');return;}
   if(!hasRelicType(c.need)){toast('Bring a '+RT[c.need].name+' to join.','warn');return;}
-  S.clan={kind:'npc',id:id};computeFx();rebuildTreehouseMeshes();renderHud();saveGame();
+  S.clan={kind:'npc',id:id};computeFx();rebuildCabinFlags();renderHud();saveGame();
   Sfx.relic(1);toast('Elder '+c.elder+' welcomes you to '+c.name+'. Perk gained: '+c.perk+'.','gold');
   G.hintT=8;
   renderClan();
@@ -2568,8 +2905,8 @@ function foundClan(){
   if(S.wood<8){toast('Founding a clan needs 8 wood.','warn');return;}
   S.wood-=8;
   S.clan={kind:'own',name:name,color:OWN_COLORS[UI.found.color],emblem:UI.found.emb};
-  computeFx();rebuildTreehouseMeshes();renderHud();saveGame();Sfx.build();
-  toast('The '+name+' are founded. Your banner will fly from every treehouse.','gold');
+  computeFx();rebuildCabinFlags();renderHud();saveGame();Sfx.build();
+  toast('The '+name+' are founded. Your banner will fly from your cabin.','gold');
   G.hintT=10;renderClan();
 }
 function renderRelics(){
@@ -2656,6 +2993,9 @@ window.addEventListener('keydown',e=>{
     case 'KeyT':tryPlaceHatch();break;
     case 'KeyR':tryRecall();break;
     case 'KeyH':pauseGame();break;
+    case 'KeyB':toggleBuild();break;
+    case 'KeyQ':if(CAB.on)cabCycle(1);break;
+    case 'Digit1':case 'Digit2':case 'Digit3':case 'Digit4':case 'Digit5':case 'Digit6':case 'Digit7':case 'Digit8':if(CAB.on)cabSelect(+e.code.slice(5)-1);break;
   }
 });
 window.addEventListener('keyup',e=>{keys[e.code]=false;});
@@ -2667,7 +3007,7 @@ document.addEventListener('mousemove',e=>{
 canvas.addEventListener('mousedown',e=>{
   if(G.mode!=='play')return;
   if(!G.locked){G.drag=true;requestLock();}
-  else if(e.button===0){input.dig=true;}
+  else if(e.button===0){if(CAB.on)placePiece();else input.dig=true;}
 });
 window.addEventListener('mouseup',()=>{G.drag=false;input.dig=false;});
 canvas.addEventListener('contextmenu',e=>e.preventDefault());
@@ -2701,7 +3041,7 @@ canvas.addEventListener('contextmenu',e=>e.preventDefault());
   document.querySelectorAll('#tmenu button').forEach(b=>b.addEventListener('click',()=>togglePanel(b.getAttribute('data-open'))));
 })();
 /* ===== multiplayer: shared forest, see other players, chat ===== */
-const Net={on:false,kind:null,code:'',name:'Wanderer',peers:new Map(),sendState:null,sendChat:null,close:null,sendT:0,lastSig:'',status:''};
+const Net={on:false,kind:null,code:'',name:'Wanderer',peers:new Map(),sendState:null,sendChat:null,close:null,sendT:0,lastSig:'',status:'',host:false,max:8};
 const AV=new Map();
 const MP_KEY='hollowbough-mp';
 function mpLoadPrefs(){try{const o=JSON.parse(localStorage.getItem(MP_KEY)||'null');if(o&&typeof o==='object')return o;}catch(e){}return {};}
@@ -2744,14 +3084,14 @@ function maskBad(s){
 function cleanName(s){const n=String(s==null?'':s).replace(/[^\w \-.']/g,'').trim().slice(0,16);return badWordHit(n)?'Wanderer':n;}
 function localState(){
   return {n:Net.name,x:+P.x.toFixed(2),y:+P.y.toFixed(2),z:+P.z.toFixed(2),r:+P.yaw.toFixed(2),u:P.ug?1:0,
-    c:S.clan?clanColor():'',k:S.clan?String(clanName()).slice(0,22):''};
+    c:S.clan?clanColor():'',k:S.clan?String(clanName()).slice(0,22):'',h:Net.host?1:0,m:Net.max};
 }
 function sanePeer(p){
   if(!p||typeof p!=='object')return null;
   const x=+p.x,y=+p.y,z=+p.z,r=+p.r;
   if(!isFinite(x)||!isFinite(y)||!isFinite(z)||Math.abs(x)>1e6||Math.abs(z)>1e6||Math.abs(y)>1e5)return null;
   return {n:cleanName(p.n)||'Wanderer',x:x,y:y,z:z,r:isFinite(r)?r:0,u:p.u?1:0,
-    c:/^#[0-9a-fA-F]{6}$/.test(p.c||'')?p.c:'',k:typeof p.k==='string'&&!badWordHit(p.k)?p.k.replace(/[^\w \-.']/g,'').slice(0,22):''};
+    c:/^#[0-9a-fA-F]{6}$/.test(p.c||'')?p.c:'',k:typeof p.k==='string'&&!badWordHit(p.k)?p.k.replace(/[^\w \-.']/g,'').slice(0,22):'',h:p.h?1:0,m:Math.max(2,Math.min(8,(+p.m)|0||8))};
 }
 /* ---- chat ---- */
 function chatLine(name,text,sys){
@@ -2824,7 +3164,7 @@ function updateOnlineChip(){
   chip.style.display='';
   $('onlineN').textContent=Net.peers.size+1;
   const names=[...Net.peers.values()].slice(0,4).map(p=>p.n);
-  $('onlineNames').textContent=names.length?names.join(', ')+(Net.peers.size>4?'...':''):'waiting for others';
+  $('onlineNames').textContent=(Net.host?'hosting ':'game ')+Net.code.toUpperCase()+' · '+(names.length?names.join(', ')+(Net.peers.size>4?'...':''):'waiting for others');
 }
 function netTick(dt,t){
   if(!Net.on)return;
@@ -2849,25 +3189,34 @@ function netTick(dt,t){
   for(const [id,a] of AV)if(!Net.peers.has(id)){disposeAvatar(a);AV.delete(id);}
 }
 function netStop(msg){
+  const was=Net.on;
   if(Net.close){try{Net.close();}catch(e){}}
-  Net.on=false;Net.kind=null;Net.sendState=null;Net.sendChat=null;Net.close=null;Net.peers=new Map();
+  Net.on=false;Net.host=false;Net.kind=null;Net.sendState=null;Net.sendChat=null;Net.close=null;Net.peers=new Map();
   for(const [id,a] of AV)disposeAvatar(a);AV.clear();
   updateOnlineChip();
   const b=$('btnMpLeave');if(b)b.style.display='none';
   if(msg)toast(msg,'warn');
+  if(was&&G.mp)setTimeout(()=>{try{location.reload();}catch(e){}},1800);
 }
-/* ---- transport A: the host page's shared room (claude.ai artifact) ---- */
-async function connectRoom(code){
+/* ---- transport A: the host page's shared room (claude.ai artifact). One player hosts; the rest join by code. ---- */
+async function connectRoom(code,host,max){
   if(!window.claude||!window.claude.use)return null;
   let room;try{room=await window.claude.use('room');}catch(e){return null;}
   if(!room)return null;
   let R=room;
   try{R=await room.join('hb-'+code);}catch(e){R=room;}
-  const offs=[];
+  const offs=[];let seenHost=false,failed='',hostGone=false,live=false,lastHost=null;
+  const close=()=>{offs.forEach(f=>f&&f());if(R.leave)R.leave().catch(()=>{});else R.presence({x:null,y:null,z:null}).catch(()=>{});};
   offs.push(R.onPeers(ch=>{
     const next=new Map();
     for(const p of ch.peers){if(p.isMe)continue;const s=sanePeer(p.presence);if(s)next.set(p.peer,s);}
-    netPeersChanged(next);
+    const hp=[...next.values()].find(p=>p.h);
+    if(host){if(hp&&!live)failed='That code is already hosting a game.';}
+    else{
+      if(hp){seenHost=true;lastHost=hp;if(!live&&next.size+1>hp.m)failed='That game is full.';}
+      else if(seenHost&&live&&!hostGone){hostGone=true;netStop('The host ended the game.');return;}
+    }
+    if(live)netPeersChanged(next);
   }));
   offs.push(R.on('chat',m=>{
     const d=m.data;if(!d||typeof d!=='object')return;
@@ -2875,11 +3224,21 @@ async function connectRoom(code){
   }));
   Net.sendState=s=>{R.presence(s).catch(()=>{});};
   Net.sendChat=t=>{R.emit('chat',{n:Net.name,t:t}).catch(()=>{});};
-  Net.close=()=>{offs.forEach(f=>f&&f());if(R.leave)R.leave().catch(()=>{});else R.presence({x:null,y:null,z:null}).catch(()=>{});};
+  Net.close=close;
   Net.kind='room';
+  R.presence(localState()).catch(()=>{});
+  const wait=host?1600:4500,t0=performance.now();
+  while(performance.now()-t0<wait){
+    await new Promise(r=>setTimeout(r,100));
+    if(failed)break;
+    if(!host&&seenHost)break;
+  }
+  if(!failed&&!host&&!seenHost)failed='No game found with that code.';
+  if(failed){close();Net.close=null;Net.sendState=null;Net.sendChat=null;throw new Error(failed);}
+  live=true;
   return true;
 }
-/* ---- transport B: WebRTC through PeerJS (standalone copies, one host per room code) ---- */
+/* ---- transport B: WebRTC through PeerJS (standalone copies; the host is the hub) ---- */
 function loadPeerJS(){
   return new Promise((res,rej)=>{
     if(window.Peer)return res();
@@ -2887,7 +3246,7 @@ function loadPeerJS(){
     s.onload=()=>res();s.onerror=()=>rej(new Error('Could not load the connection library.'));document.head.appendChild(s);
   });
 }
-async function connectPeerJS(code){
+async function connectPeerJS(code,wantHost,max){
   await loadPeerJS();
   const hostId='hollowbough-'+code.toLowerCase().replace(/[^a-z0-9]/g,'');
   return new Promise((resolve,reject)=>{
@@ -2897,18 +3256,18 @@ async function connectPeerJS(code){
       const conns=new Map(),roster=new Map();
       const bcast=m=>{for(const c of conns.values())if(c.open)c.send(m);};
       peer.on('connection',c=>{
+        if(conns.size>=max-1){c.on('open',()=>{try{c.send({t:'full'});}catch(e){}setTimeout(()=>{try{c.close();}catch(e){}},300);});return;}
         conns.set(c.peer,c);
         c.on('data',d=>{
           if(!d||typeof d!=='object')return;
-          if(d.t==='s'){const s=sanePeer(d.s);if(s)roster.set(c.peer,s);}
+          if(d.t==='s'){const s=sanePeer(d.s);if(s){s.h=0;roster.set(c.peer,s);}}
           else if(d.t==='c'){const nm=cleanName(d.n)||'Wanderer',tx=c2(d.x||'');if(tx){chatLine(nm,tx,false);bcast({t:'c',n:nm,x:tx});}}
         });
         const drop=()=>{conns.delete(c.peer);roster.delete(c.peer);};
         c.on('close',drop);c.on('error',drop);
       });
       const iv=setInterval(()=>{
-        const next=new Map(roster);
-        netPeersChanged(next);
+        netPeersChanged(new Map(roster));
         const all={};for(const [id,p] of roster)all[id]=p;all.__host=localState();
         bcast({t:'r',r:all});
       },100);
@@ -2919,65 +3278,100 @@ async function connectPeerJS(code){
     }
     function asGuest(){
       const peer=new Peer();
-      peer.on('error',e=>{if(!settled)done(false,new Error('Could not reach the host ('+(e.type||'error')+').'));else netStop('Connection lost.');});
+      peer.on('error',e=>{
+        if(!settled)done(false,new Error(e.type==='peer-unavailable'?'No game found with that code.':'Could not reach the game ('+(e.type||'error')+').'));
+        else netStop('Connection lost.');
+      });
       peer.on('open',myId=>{
         const conn=peer.connect(hostId,{reliable:false});
+        let full=false;
         conn.on('open',()=>{
           Net.sendState=s=>{if(conn.open)conn.send({t:'s',s:s});};
           Net.sendChat=tx=>{if(conn.open)conn.send({t:'c',n:Net.name,x:tx});};
           Net.close=()=>{try{peer.destroy();}catch(e){}};
-          Net.kind='guest';done(true,true);
+          Net.kind='guest';
+          setTimeout(()=>{if(full)done(false,new Error('That game is full.'));else done(true,true);},400);
         });
         conn.on('data',d=>{
           if(!d||typeof d!=='object')return;
-          if(d.t==='r'&&d.r&&typeof d.r==='object'){
+          if(d.t==='full'){full=true;if(settled)netStop('That game is full.');}
+          else if(d.t==='r'&&d.r&&typeof d.r==='object'){
             const next=new Map();
             for(const id in d.r){if(id===myId)continue;const s=sanePeer(d.r[id]);if(s)next.set(id,s);}
             netPeersChanged(next);
           }else if(d.t==='c'){chatLine(cleanName(d.n)||'Wanderer',c2(d.x||''),false);}
         });
-        conn.on('close',()=>netStop('The host left the room.'));
+        conn.on('close',()=>{if(!full)netStop('The host ended the game.');});
       });
     }
-    const hp=new Peer(hostId);
-    hp.on('open',()=>{asHost(hp);done(true,true);});
-    hp.on('error',e=>{
-      if(e.type==='unavailable-id'&&!settled){try{hp.destroy();}catch(x){}asGuest();}
-      else if(!settled)done(false,new Error('Connection failed ('+(e.type||'error')+').'));
-      else if(Net.kind==='host')netStop('Connection lost.');
-    });
+    if(wantHost){
+      const hp=new Peer(hostId);
+      hp.on('open',()=>{asHost(hp);done(true,true);});
+      hp.on('error',e=>{
+        if(!settled){try{hp.destroy();}catch(x){}done(false,new Error(e.type==='unavailable-id'?'That code is already hosting a game.':'Connection failed ('+(e.type||'error')+').'));}
+        else if(Net.kind==='host')netStop('Connection lost.');
+      });
+    }else asGuest();
     setTimeout(()=>clearTimeout(timer),16000);
   });
 }
-async function netJoin(name,code){
+const CODE_CHARS='ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+function newGameCode(){let c='';for(let i=0;i<5;i++)c+=CODE_CHARS[Math.floor(Math.random()*CODE_CHARS.length)];return c;}
+function cleanCode(c){return String(c||'').toLowerCase().replace(/[^a-z0-9]/g,'').slice(0,12);}
+async function netStart(name,code,host,max){
   netStop();
   Net.name=cleanName(name)||'Wanderer';
-  Net.code=(String(code||'').toLowerCase().replace(/[^a-z0-9_.-]/g,'').slice(0,20))||'forest';
-  mpSavePrefs();
-  toast('Connecting to room "'+Net.code+'"...');
-  try{
-    let ok=await connectRoom(Net.code);
-    if(!ok)ok=await connectPeerJS(Net.code);
-    if(!ok)throw new Error('Could not connect.');
-    Net.on=true;Net.lastSig='';Net.sendT=0;
-    const b=$('btnMpLeave');if(b)b.style.display='';
-    updateOnlineChip();
-    toast('Online in room "'+Net.code+'". Press Enter to chat.','gold');
-    chatLine('','You joined room "'+Net.code+'". Press Enter to chat.',true);
-  }catch(e){netStop(null);toast((e&&e.message)||'Could not connect.','warn');}
+  Net.host=!!host;Net.max=Math.max(2,Math.min(8,(+max)|0||8));
+  let tries=host?4:1;
+  for(;tries>0;tries--){
+    Net.code=host?newGameCode().toLowerCase():cleanCode(code);
+    if(!Net.code){Net.host=false;toast('Enter the game code first.','warn');return false;}
+    mpSavePrefs();
+    toast(host?'Starting your game...':'Looking for game '+Net.code.toUpperCase()+'...');
+    try{
+      let ok=await connectRoom(Net.code,Net.host,Net.max);
+      if(!ok)ok=await connectPeerJS(Net.code,Net.host,Net.max);
+      if(!ok)throw new Error('Could not connect.');
+      Net.on=true;Net.lastSig='';Net.sendT=0;
+      const b=$('btnMpLeave');if(b){b.style.display='';b.textContent=Net.host?'End game':'Leave game';}
+      updateOnlineChip();
+      const up=Net.code.toUpperCase();
+      if(Net.host){toast('Game hosted. Code: '+up+'. Share it, up to '+(Net.max-1)+' others can join.','gold');chatLine('','You are hosting. Code: '+up+' (max '+Net.max+' players). Press Enter to chat.',true);}
+      else{toast('Joined game '+up+'. Press Enter to chat.','gold');chatLine('','You joined game '+up+'. Press Enter to chat.',true);}
+      return true;
+    }catch(e){
+      const m=(e&&e.message)||'Could not connect.';
+      if(host&&tries>1&&/already hosting/.test(m))continue;
+      netStop(null);toast(m,'warn');return false;
+    }
+  }
 }
 /* ---- start screen + pause menu ---- */
+function startMultiplayer(host,code){
+  const nm=$('mpName');
+  if(!host&&!cleanCode(code)){toast('Enter a game code to join.','warn');$('mpCode').focus();return;}
+  const btns=[$('btnHost'),$('btnMp')];btns.forEach(b=>b.disabled=true);
+  netStart(nm.value,code,host,8).then(ok=>{
+    btns.forEach(b=>b.disabled=false);
+    if(!ok)return;
+    G.mp=true;
+    startGame(false,true);
+    const a=Math.random()*Math.PI*2;
+    P.x=6+Math.cos(a)*1.6;P.z=6+Math.sin(a)*1.6;P.y=terrainH(P.x,P.z)+0.2;
+    updateOnlineChip();
+  });
+}
 (function(){
   const pr=mpLoadPrefs();
   const nm=$('mpName'),cd=$('mpCode');
-  nm.value=pr.name||'';cd.value=pr.code||'forest';
-  $('btnMp').addEventListener('click',()=>{
-    const name=nm.value,code=cd.value;
-    startGame(hasSave);
-    netJoin(name,code);
-  });
-  $('btnMpLeave').addEventListener('click',()=>{netStop('You left the room.');});
-  nm.addEventListener('keydown',e=>e.stopPropagation());cd.addEventListener('keydown',e=>e.stopPropagation());
+  nm.value=pr.name||'';cd.value='';
+  $('btnHost').addEventListener('click',()=>startMultiplayer(true,''));
+  $('btnMp').addEventListener('click',()=>startMultiplayer(false,cd.value));
+  $('btnMpLeave').addEventListener('click',()=>{netStop(Net.host?'You ended the game.':'You left the game.');});
+  const chip=$('onlineChip');
+  chip.style.cursor='pointer';
+  chip.addEventListener('click',()=>{try{navigator.clipboard.writeText(Net.code.toUpperCase()).then(()=>toast('Game code copied.'),()=>{});}catch(e){}});
+  for(const el of [nm,cd])el.addEventListener('keydown',e=>e.stopPropagation());
 })();
 
 /* ===== frame ===== */
@@ -2993,7 +3387,7 @@ function clanTip(){
     const t=RT[best.type];
     msgs.push('A '+RARITY[best.rar].name.toLowerCase()+' light stands to the '+compass(best.x-P.x,best.z-P.z)+', about '+Math.round(bd)+' paces. It hums like a '+t.name+'.');
   }
-  msgs.push('Tunnels link the glades. Dig between two entrances and you can cross the forest unseen.','Giant trunks hold a treehouse best. Thin ones will not.','Something glints in the rock below. Dig slowly and listen.','Branches fall after storms. Gather them before dusk.');
+  msgs.push('Tunnels link the glades. Dig between two entrances and you can cross the forest unseen.','Press B to build a cabin. Logs, a floor, a roof and a bed make a home.','Something glints in the rock below. Dig slowly and listen.','Branches fall after storms. Gather them before dusk.');
   return msgs[Math.floor(Math.random()*msgs.length)];
 }
 const _col=new THREE.Color();
@@ -3011,7 +3405,7 @@ function frame(dt){
   const t=performance.now()/1000;
   skyTick(t,dt,playing&&!G.busy);
   netTick(dt,t);
-  if(BR.n!==S.treehouses.length)buildBridgeMeshes();
+  cabinTick(dt,t);
   /* mode specific world updates */
   if(!P.ug){
     const pending=updateChunks(false);
@@ -3022,7 +3416,7 @@ function frame(dt){
           S.discovered[c.id]=true;toast('You spot the banner of '+c.name+' to the '+compass(c.camp[0]-P.x,c.camp[1]-P.z)+'.','gold');
         }
       }
-      G.atCamp=S.treehouses.some(t=>Math.hypot(t.x-P.x,t.z-P.z)<12)?'hall':null;
+      G.atCamp=cabinBeds()&&cabinNear(10)?'hall':null;
       G.birdT-=dt;if(G.birdT<=0){G.birdT=5+Math.random()*9;if(SKY_NOW.nightW<0.3)Sfx.bird();}
     }
   }else{
@@ -3125,7 +3519,7 @@ function loop(ts){
 
 /* ===== boot ===== */
 function resetState(){
-  Object.assign(S,{wood:8,relics:[],equipped:[],uid:1,collected:{},treehouses:[],hatches:[],dug:{},clan:null,discovered:{},time:0.12*DAY_LEN,found:0,sleeps:0,ores:{copper:0,iron:0,gold:0,aether:0}});
+  Object.assign(S,{wood:8,relics:[],equipped:[],uid:1,collected:{},treehouses:[],cabin:[],hatches:[],dug:{},clan:null,discovered:{},time:0.12*DAY_LEN,found:0,sleeps:0,ores:{copper:0,iron:0,gold:0,aether:0}});
   Object.assign(P,{x:6,y:3.2,z:6,vy:0,vx:0,vz:0,yaw:0.6,pitch:-0.05,onGround:false,ug:false});
 }
 function reloadWorld(){
@@ -3136,13 +3530,13 @@ function reloadWorld(){
   mm.cx=1e9;UG.dirty=true;
   updateChunks(true);
 }
-function startGame(cont){
+function startGame(cont,mp){
   Sfx.init();
   if(cont){
     const o=readSave();
     if(o){resetState();applySave(o);}
   }else{
-    clearSave();resetState();
+    if(!mp)clearSave();resetState();
     P.y=terrainH(P.x,P.z)+0.2;
   }
   P.pitch=-0.05;
@@ -3154,7 +3548,7 @@ function startGame(cont){
   G.mode='play';G.hintT=60;
   document.body.focus&&document.body.focus();
   requestLock();
-  if(!cont)toast('Follow the glow ahead of you. Branches on the ground give wood.');
+  if(!cont&&!mp)toast('Follow the glow ahead of you. Branches on the ground give wood.');
   saveGame();
 }
 function boot(){
@@ -3173,9 +3567,18 @@ function boot(){
     requestAnimationFrame(t=>{lastT=t;loop(t);});
   },30);
 }
-$('btnBegin').addEventListener('click',()=>startGame(false));
-$('btnContinue').addEventListener('click',()=>startGame(true));
-$('btnNew').addEventListener('click',()=>startGame(false));
+function startPanel(w){
+  $('modeMenu').style.display=w?'none':'';
+  $('soloPanel').style.display=w==='solo'?'':'none';
+  $('mpPanel').style.display=w==='multi'?'':'none';
+  if(w==='multi'){const n=$('mpName');if(n&&!n.value)n.focus();}
+}
+$('btnSolo').addEventListener('click',()=>startPanel('solo'));
+$('btnMulti').addEventListener('click',()=>startPanel('multi'));
+document.querySelectorAll('[data-back]').forEach(b=>b.addEventListener('click',()=>startPanel(null)));
+$('btnBegin').addEventListener('click',()=>{netStop();startGame(false);});
+$('btnContinue').addEventListener('click',()=>{netStop();startGame(true);});
+$('btnNew').addEventListener('click',()=>{netStop();startGame(false);});
 $('btnResume').addEventListener('click',resumeGame);
 let resetArm=0;
 $('btnReset').addEventListener('click',()=>{
@@ -3189,7 +3592,7 @@ $('btnMute').addEventListener('click',()=>{Sfx.setOn(!Sfx.on);$('btnMute').textC
 $('paused').addEventListener('click',e=>{if(e.target===$('paused'))resumeGame();});
 window.addEventListener('beforeunload',()=>{if(G.mode!=='menu')saveGame();});
 
-window.__hb={Net:Net,AV:AV,netJoin:netJoin,SKYFALLS:SKYFALLS,doInteract:doInteract,scanInteract:scanInteract,oreAt:oreAt,S:S,P:P,G:G,UG:UG,chunks:chunks,frame:frame,scene:scene,camera:camera,renderer:renderer,startGame:startGame,buildTreehouse:buildTreehouse,tryPlaceHatch:tryPlaceHatch,enterUG:enterUG,exitUG:exitUG,addHatch:addHatch,ugRebuild:ugRebuild,openPanel:openPanel,closePanel:closePanel,scanInteract:scanInteract,doInteract:doInteract,joinClan:joinClan,foundClan:foundClan,keys:keys,input:input,terrainH:terrainH,updateChunks:updateChunks,collectRelic:collectRelic,computeFx:computeFx,RELIC_TYPES:RELIC_TYPES,CLANS:CLANS,UI:UI,tryRecall:tryRecall,setMode:setMode,fx:()=>FX};
+window.__hb={cabCheck:cabCheck,cabCost:cabCost,indexAdd:indexAdd,addPieceObj:addPieceObj,resolveSolids:resolveSolids,groundAt:groundAt,terrainH:terrainH,cabinPrompt:cabinPrompt,computeFx:computeFx,rebuildCabinFlags:rebuildCabinFlags,cabinNear:cabinNear,cabinPlots:cabinPlots,CAB:CAB,placePiece:placePiece,toggleBuild:toggleBuild,cabSelect:cabSelect,cabinBeds:cabinBeds,tryRecall:tryRecall,saveGame:saveGame,Net:Net,AV:AV,netStart:netStart,SKYFALLS:SKYFALLS,doInteract:doInteract,scanInteract:scanInteract,oreAt:oreAt,S:S,P:P,G:G,UG:UG,chunks:chunks,frame:frame,scene:scene,camera:camera,renderer:renderer,startGame:startGame,buildTreehouse:buildTreehouse,tryPlaceHatch:tryPlaceHatch,enterUG:enterUG,exitUG:exitUG,addHatch:addHatch,ugRebuild:ugRebuild,openPanel:openPanel,closePanel:closePanel,scanInteract:scanInteract,doInteract:doInteract,joinClan:joinClan,foundClan:foundClan,keys:keys,input:input,terrainH:terrainH,updateChunks:updateChunks,collectRelic:collectRelic,computeFx:computeFx,RELIC_TYPES:RELIC_TYPES,CLANS:CLANS,UI:UI,tryRecall:tryRecall,setMode:setMode,fx:()=>FX};
 boot();
 })();
 
