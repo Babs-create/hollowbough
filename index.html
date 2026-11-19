@@ -316,7 +316,7 @@ const RELIC_TYPES=[
   {id:'heart',name:'Heartwood Knot',prop:'Forager',color:0x8dff9b,css:'#8dff9b',text:p=>'+'+Math.floor(p)+' wood from every branch.'},
   {id:'sight',name:"Seer's Eye",prop:'Sense',color:0xff8fb8,css:'#ff8fb8',text:p=>'Shows relics on the map within '+Math.round(70*p)+' paces. Buried relics glint through rock within '+Math.round(4*p)+' cells.'},
   {id:'spring',name:'Springroot',prop:'Leap',color:0x6bd9a8,css:'#6bd9a8',text:p=>'Jump '+Math.round(35*p)+'% higher.'},
-  {id:'pack',name:'Satchel Knot',prop:'Capacity',color:0xffd27a,css:'#ffd27a',text:p=>'Adds '+Math.round(2*p)+' power slots while equipped. It takes one itself, so the net gain is '+(Math.round(2*p)-1)+'.'}
+  {id:'pack',name:'Satchel Knot',prop:'Capacity',color:0xffd27a,css:'#ffd27a',text:p=>'Used up when collected. Adds '+Math.round(2*p-1)+' permanent power slot'+(Math.round(2*p-1)===1?'':'s')+' (maximum 6).'}
 ];
 const RT={};RELIC_TYPES.forEach(t=>RT[t.id]=t);
 const CLANS=[];
@@ -363,7 +363,7 @@ function nearCamp(x,z,r){
 
 /* ===== state ===== */
 const S={
-  wood:8,relics:[],equipped:[],uid:1,collected:{},treehouses:[],cabin:[],hatches:[],dug:{},
+  wood:8,relics:[],equipped:[],slotBonus:0,uid:1,collected:{},treehouses:[],cabin:[],hatches:[],dug:{},
   clan:null,discovered:{},time:0.12*DAY_LEN,found:0,sleeps:0,ores:{copper:0,iron:0,gold:0,aether:0}
 };
 const ORES=[
@@ -379,7 +379,7 @@ let hasSave=false;
 function saveGame(){
   if(G.mp)return;
   try{
-    const o={x:P.x,z:P.z,yaw:P.yaw,wood:S.wood,relics:S.relics,equipped:S.equipped,uid:S.uid,collected:S.collected,cabin:S.cabin.map(p=>({k:p.k,i:p.i,j:p.j,r:p.r,y:p.y})),hatches:S.hatches,dug:S.dug,clan:S.clan,discovered:S.discovered,time:S.time,found:S.found,sleeps:S.sleeps,ores:S.ores};
+    const o={x:P.x,z:P.z,yaw:P.yaw,wood:S.wood,relics:S.relics,equipped:S.equipped,slotBonus:S.slotBonus|0,uid:S.uid,collected:S.collected,cabin:S.cabin.map(p=>({k:p.k,i:p.i,j:p.j,r:p.r,y:p.y})),hatches:S.hatches,dug:S.dug,clan:S.clan,discovered:S.discovered,time:S.time,found:S.found,sleeps:S.sleeps,ores:S.ores};
     localStorage.setItem(SAVE_KEY,JSON.stringify(o));
   }catch(e){}
 }
@@ -387,8 +387,11 @@ function readSave(){
   try{const raw=localStorage.getItem(SAVE_KEY);if(!raw)return null;const o=JSON.parse(raw);return o&&typeof o==='object'?o:null;}catch(e){return null;}
 }
 function applySave(o){
-  for(const k of ['wood','relics','equipped','uid','collected','cabin','hatches','dug','clan','discovered','time','found','sleeps','ores']){if(o[k]!==undefined)S[k]=o[k];}
+  for(const k of ['wood','relics','equipped','slotBonus','uid','collected','cabin','hatches','dug','clan','discovered','time','found','sleeps','ores']){if(o[k]!==undefined)S[k]=o[k];}
   for(const q of ORES)if(typeof S.ores[q.id]!=='number')S.ores[q.id]=0;
+  S.slotBonus=Math.max(0,Math.min(3,S.slotBonus|0));
+  {const keep=[];for(const r of S.relics){if(r.type==='pack'){S.slotBonus=Math.min(3,S.slotBonus+Math.max(1,Math.round(2*RARITY[r.rar].pow-1)));}else keep.push(r);}
+   S.relics=keep;S.equipped=S.equipped.filter(u=>keep.some(r=>r.uid===u));}
   if(Array.isArray(o.treehouses)&&o.treehouses.length){G.legacyRefund=o.treehouses.length*10;S.wood+=G.legacyRefund;}
   S.treehouses=[];if(!Array.isArray(S.cabin))S.cabin=[];
   if(S.clan&&S.clan.kind!=='own')S.clan=null;
@@ -397,6 +400,26 @@ function applySave(o){
 function clearSave(){try{localStorage.removeItem(SAVE_KEY);}catch(e){}}
 
 const RANK_MUL={Initiate:1,Ranger:1.25,Warden:1.5,Elder:2,Founder:1.5};
+const LEGENDS=[
+  {id:'gale',name:'Gale Stride',text:'+30% move speed',fx:{speed:0.30}},
+  {id:'titan',name:'Titan Delving',text:'+50% dig speed',fx:{dig:0.50}},
+  {id:'skyborne',name:'Skyborne',text:'Hold Space in the air to glide',fx:{glide:1.5}},
+  {id:'everlight',name:'Everlight',text:'+60% light radius',fx:{light:0.60}},
+  {id:'bounty',name:'Bountiful Boughs',text:'+2 wood from every branch',fx:{wood:2}},
+  {id:'tide',name:'Tidewalker',text:'No water slowdown and +25% jump',fx:{wade:1,jump:0.25}},
+  {id:'seer',name:"Seer's Gift",text:'Strong relic sense on the map and through rock',fx:{sense:2}},
+  {id:'mason',name:'Master Builder',text:'Cabin pieces cost much less wood',fx:{build:5}}
+];
+const LEGEND_BY_ID={};LEGENDS.forEach(l=>LEGEND_BY_ID[l.id]=l);
+function addLegend(f,id){
+  const l=LEGEND_BY_ID[id];if(!l)return f;
+  for(const k in l.fx){
+    if(k==='wade')f.wade=1;
+    else if(k==='glide'||k==='sense')f[k]=Math.max(f[k]||0,l.fx[k]);
+    else f[k]=(f[k]||0)+l.fx[k];
+  }
+  return f;
+}
 function clanFx(c){
   if(!c)return {};
   const m=RANK_MUL[clanRank()]||1;
@@ -404,8 +427,9 @@ function clanFx(c){
   if(c.kind==='own'){
     f.speed+=0.06*m;f.dig=0.15*m;f.build=2;
     if(cabinBeds()>=1)f.wood=1;
-    return f;
+    return addLegend(f,c.lp);
   }
+  if(c.kind==='member'){f.speed+=0.02*m;f.dig=0.08*m;return addLegend(f,c.lp);}
   const d=CLAN_BY_ID[c.id];if(!d)return f;
   for(const k in d.fx){
     if(k==='wade')f.wade=1;
@@ -423,13 +447,13 @@ function clanBonusList(){
   if(f.wood)o.push('+'+f.wood+' wood per branch');
   if(f.wade)o.push('no water slowdown');
   if(f.build)o.push('cabin pieces cost less wood');
+  if(f.glide)o.push('glide');
+  if(f.sense)o.push('relic sense');
   return o;
 }
-function slotCap(eq){
-  let c=3;
-  for(const uid of (eq||S.equipped)){const r=S.relics.find(q=>q.uid===uid);if(r&&r.type==='pack')c+=Math.round(2*RARITY[r.rar].pow);}
-  return Math.min(c,12);
-}
+function slotCap(){return 3+Math.max(0,Math.min(3,S.slotBonus|0));}
+function slotsMaxed(){return (S.slotBonus|0)>=3;}
+function knotGain(rar){return Math.max(0,Math.min(3-(S.slotBonus|0),Math.round(2*RARITY[rar].pow-1)));}
 function computeFx(){
   {const mx=slotCap();if(S.equipped.length>mx)S.equipped.length=mx;}
   const f={speed:1,jump:1,glide:0,light:1,dig:1,wood:0,sense:0,wade:0,build:0};
@@ -454,6 +478,8 @@ function computeFx(){
   if(cf.wood)f.wood+=cf.wood;
   if(cf.wade)f.wade=1;
   if(cf.build)f.build=cf.build;
+  if(cf.glide)f.glide=Math.max(f.glide,cf.glide);
+  if(cf.sense)f.sense=Math.max(f.sense,cf.sense);
   FX=f;
 }
 function treehouseCost(){return Math.max(4,10-FX.build);}
@@ -464,11 +490,13 @@ function clanRank(){
   if(c.kind==='own')return 'Founder';
   const n=S.found;return n<3?'Initiate':n<8?'Ranger':n<15?'Warden':'Elder';
 }
-function clanColor(){return S.clan?(S.clan.kind==='own'?S.clan.color:CLAN_BY_ID[S.clan.id].color):'#e9d9a8';}
-function clanName(){return S.clan?(S.clan.kind==='own'?S.clan.name:CLAN_BY_ID[S.clan.id].name):'';}
-function clanEmblem(){return S.clan?(S.clan.kind==='own'?S.clan.emblem:CLAN_BY_ID[S.clan.id].emblem):0;}
+const clanCustom=c=>c.kind==='own'||c.kind==='member';
+function clanColor(){return S.clan?(clanCustom(S.clan)?S.clan.color:CLAN_BY_ID[S.clan.id].color):'#e9d9a8';}
+function clanName(){return S.clan?(clanCustom(S.clan)?S.clan.name:CLAN_BY_ID[S.clan.id].name):'';}
+function clanEmblem(){return S.clan?(clanCustom(S.clan)?S.clan.emblem:CLAN_BY_ID[S.clan.id].emblem):0;}
 function memberCount(){
   if(!S.clan)return 0;
+  if(S.clan.kind==='member'){let n=1;for(const p of Net.peers.values())if(p.k===S.clan.name)n++;return n;}
   if(S.clan.kind==='own')return 1+Math.min(5,cabinBeds())*3+Math.floor(S.found/2);
   return 9+((S.clan.id.length*7)%6)+Math.floor(S.found/3);
 }
@@ -1662,7 +1690,7 @@ function skyTick(t,dt,active){
     if(s.robj){
       s.robj.position.y=s.top+1.6+Math.sin(t*1.6+s.i)*0.25;
       const u=s.robj.userData;u.core.rotation.y=t*1.2+s.i;u.r1.rotation.z=t*0.9;u.r2.rotation.z=-t*0.7;
-      if(active&&!P.ug&&Math.abs(P.y-s.top)<4&&Math.hypot(P.x-s.rx,P.z-s.rz)<1.9){const o=s.robj;s.robj=null;collectRelic({id:s.rid,type:s.rtype,rar:s.rar,obj:o});}
+      if(active&&!P.ug&&!(s.rtype==='pack'&&slotsMaxed())&&Math.abs(P.y-s.top)<4&&Math.hypot(P.x-s.rx,P.z-s.rz)<1.9){const o=s.robj;s.robj=null;collectRelic({id:s.rid,type:s.rtype,rar:s.rar,obj:o});}
     }
     s.mist.material.opacity=0.55+Math.sin(t*1.3+s.i)*0.12;
     if(active&&!P.ug&&!S.discovered['sky'+s.i]&&Math.hypot(P.x-s.bx,P.z-s.bz)<110){
@@ -1894,7 +1922,6 @@ function floorLevel(i,j){
 }
 function cabCheck(kind,s){
   const p={k:kind,i:s.i,j:s.j,r:s.r},pos=pPos(p);
-  if(S.cabin.length>=500)return {ok:false,why:'Cabin size limit reached.'};
   if(CAB.occ.has(slotKey(kind,s.i,s.j,s.r)))return {ok:false,why:'Something is already there.'};
   const h=terrainH(pos.x,pos.z);
   if(h<WATER_Y+0.5)return {ok:false,why:'Too wet to build.'};
@@ -2035,9 +2062,9 @@ const CAB_CODE={wall:'w',door:'d',window:'n',floor:'f',roof:'r',bed:'b',flag:'g'
 for(const k in CAB_CODE)CAB_DECODE[CAB_CODE[k]]=k;
 function cabEncode(){return S.cabin.map(p=>CAB_CODE[p.k]+p.i+','+p.j+','+p.r+','+(Math.round(p.y*10)/10)).join(';');}
 function cabParse(str){
-  const out=[];if(typeof str!=='string'||str.length>20000)return out;
+  const out=[];if(typeof str!=='string'||str.length>600000)return out;
   for(const t of str.split(';')){
-    if(out.length>=500)break;
+    if(out.length>=30000)break;
     const k=CAB_DECODE[t[0]];if(!k)continue;
     const a=t.slice(1).split(',').map(Number);if(a.length!==4)continue;
     const [i,j,r,y]=a;
@@ -2659,6 +2686,14 @@ function saveGameSoon(){_saveSoon=3;}
 
 /* ===== pickups ===== */
 function collectRelic(r){
+  if(r.type==='pack'){
+    const g=knotGain(r.rar);S.slotBonus=(S.slotBonus|0)+g;S.found++;S.collected[r.id]=true;
+    if(r.obj){r.obj.parent&&r.obj.parent.remove(r.obj);disposeObj(r.obj);}
+    r.dead=true;UG.dirty=true;
+    Sfx.relic(r.rar);
+    toast('Satchel Knot used. +'+g+' power slot'+(g===1?'':'s')+'. You now have '+slotCap()+'.','gold');
+    renderHud();saveGame();return;
+  }
   const rel={uid:S.uid++,type:r.type,rar:r.rar};
   S.relics.push(rel);S.found++;S.collected[r.id]=true;
   if(S.equipped.length<slotCap()){S.equipped.push(rel.uid);}
@@ -2673,7 +2708,7 @@ function collectRelic(r){
 function updatePickups(dt){
   if(P.ug){
     UG.relics.forEach((r,id)=>{
-      if(Math.hypot(P.x-r.x,P.z-r.z)<1.9){UG.relics.delete(id);collectRelic(r);}
+      if(Math.hypot(P.x-r.x,P.z-r.z)<1.9&&!(r.type==='pack'&&slotsMaxed())){UG.relics.delete(id);collectRelic(r);}
     });
     return;
   }
@@ -2694,7 +2729,7 @@ function updatePickups(dt){
     for(const r of ch.relics){
       if(r.dead)continue;
       const ax=P.x-r.x,az=P.z-r.z;
-      if(ax*ax+az*az<3.6&&Math.abs(P.y+1-r.y)<3.2)collectRelic(r);
+      if(ax*ax+az*az<3.6&&Math.abs(P.y+1-r.y)<3.2&&!(r.type==='pack'&&slotsMaxed()))collectRelic(r);
     }
   }
 }
@@ -2705,7 +2740,7 @@ function compass(dx,dz){
   const a=Math.atan2(dx,-dz),names=['north','north-east','east','south-east','south','south-west','west','north-west'];
   return names[Math.round((((a%TAU)+TAU)%TAU)/(TAU/8))%8];
 }
-const UI={found:{name:'',color:3,emb:1}};
+const UI={found:{name:'',color:3,emb:1,lp:'gale'}};
 
 /* ===== HUD ===== */
 function renderSlots(){
@@ -2927,15 +2962,30 @@ function renderClan(){
     h+='<button class="btn" data-act="sell"'+(tv>0&&nearId?'':' disabled')+'>Trade all ore for '+tv+' wood'+(nearId?'':' (stand in your cabin)')+'</button></div>';
   }
   if(S.clan){
-    const own=S.clan.kind==='own',cl=own?null:CLAN_BY_ID[S.clan.id];
+    const own=S.clan.kind==='own',mem=S.clan.kind==='member',cl=(own||mem)?null:CLAN_BY_ID[S.clan.id];
     h+='<h3>Your clan</h3><div class="grid"><div class="card"><h4><canvas class="emblem" width="60" height="60" data-emb="'+clanEmblem()+'" data-col="#ffffff" data-bg="'+clanColor()+'" style="background:'+clanColor()+';border-radius:4px"></canvas>'+esc(clanName())+'</h4>';
     h+='<div class="meta"><b>Rank:</b> '+clanRank()+' &middot; <b>Members:</b> '+memberCount()+'</div>';
-    h+='<div class="meta"><b>Perk:</b> '+(own?"Founder's Vigor":esc(cl.perk))+'</div>';
+    h+='<div class="meta"><b>Perk:</b> '+(own?"Founder's Vigor":mem?'Shared banner':esc(cl.perk))+'</div>';
+    if(S.clan.lp&&LEGEND_BY_ID[S.clan.lp])h+='<div class="meta"><b style="color:#ffd27a">Legendary:</b> '+esc(LEGEND_BY_ID[S.clan.lp].name)+' ('+esc(LEGEND_BY_ID[S.clan.lp].text)+')</div>';
     h+='<div class="meta"><b>Active bonuses:</b> '+clanBonusList().join(', ')+'</div>';
     h+='<div class="meta"><i>Bonuses grow with rank (Initiate x1, Ranger x1.25, Warden x1.5, Elder x2). Rank rises as you find relics.</i></div>';
     if(own)h+='<div class="meta">Beds in your cabin: '+cabinBeds()+'. New members arrive as you build and explore.</div>';
+    else if(mem)h+='<div class="meta">You joined this clan in a multiplayer game. Members in this game: '+memberCount()+'.</div>';
     else h+='<div class="meta"><i>'+esc(cl.motto)+'</i></div>';
     h+='<div class="acts"><button class="btn" data-act="recall">Recall to hall</button><button class="btn warn" data-act="leave">Leave clan</button></div></div></div>';
+  }
+  if(Net.on){
+    const pc=peerClans();
+    h+='<h3>Clans in this game</h3>';
+    if(!pc.length)h+='<p>No other player has a clan yet. When someone founds one, it shows here and you can join it.</p>';
+    else{
+      h+='<div class="grid">';
+      pc.forEach((q,i)=>{
+        const mine=S.clan&&clanName()===q.name;
+        h+='<div class="card"><h4><canvas class="emblem" width="60" height="60" data-emb="'+q.emblem+'" data-col="#ffffff" data-bg="'+q.color+'" style="background:'+q.color+';border-radius:4px"></canvas>'+esc(q.name)+'</h4><div class="meta">Players here: '+q.n+' ('+esc(q.who.join(', '))+')</div>'+(q.lp?'<div class="meta"><b style="color:#ffd27a">Legendary:</b> '+esc(LEGEND_BY_ID[q.lp].name)+' ('+esc(LEGEND_BY_ID[q.lp].text)+')</div>':'')+(mine?'<div class="meta"><i>Your clan</i></div>':'<div class="acts"><button class="btn gold" data-act="joinp:'+i+'">Join'+(S.clan?' (leaves '+esc(clanName())+')':'')+'</button></div>')+'</div>';
+      });
+      h+='</div>';
+    }
   }
   const canFound=S.wood>=8&&UI.found.name.trim().length>=3;
   h+='<h3>'+(S.clan&&S.clan.kind==='own'?'Refound your clan':'Found your own clan')+'</h3>';
@@ -2945,10 +2995,32 @@ function renderClan(){
   OWN_COLORS.forEach((c,i)=>{h+='<button class="swatch'+(UI.found.color===i?' sel':'')+'" data-act="swatch:'+i+'" style="background:'+c+'" aria-label="Colour '+(i+1)+'"></button>';});
   h+='</div></div><div class="field"><label>Emblem</label><div class="embs">';
   for(let i=0;i<6;i++)h+='<button class="emb'+(UI.found.emb===i?' sel':'')+'" data-act="emb:'+i+'" aria-label="Emblem '+(i+1)+'"><canvas width="60" height="60" data-emb="'+i+'" data-col="#e9f6f2"></canvas></button>';
+  h+='</div></div><div class="field"><label>Legendary power for every member</label><div class="grid">';
+  LEGENDS.forEach(l=>{h+='<button class="card'+(UI.found.lp===l.id?' sel':'')+'" data-act="lp:'+l.id+'" style="text-align:left;cursor:pointer;'+(UI.found.lp===l.id?'outline:2px solid #ffd27a;':'')+'"><h4 style="color:#ffd27a">'+esc(l.name)+'</h4><div class="meta">'+esc(l.text)+'</div></button>';});
   h+='</div></div><button class="btn gold" id="foundBtn" data-act="found"'+(canFound?'':' disabled')+'>Found clan, 8 wood</button>';
   el.innerHTML=h;drawEmblemCanvases(el);
   const inp=$('clanName');
   if(inp)inp.addEventListener('input',()=>{UI.found.name=inp.value;const b=$('foundBtn');if(b)b.disabled=!(S.wood>=8&&inp.value.trim().length>=3);});
+}
+function peerClans(){
+  const m=new Map();
+  for(const p of Net.peers.values()){
+    if(!p.k||!/^#[0-9a-fA-F]{6}$/.test(p.c||''))continue;
+    const key=p.k.toLowerCase();let q=m.get(key);
+    if(!q){q={name:p.k,color:p.c,emblem:p.e|0,lp:p.lp||'',n:0,who:[]};m.set(key,q);}
+    if(!q.lp&&p.lp)q.lp=p.lp;
+    q.n++;if(q.who.length<4)q.who.push(p.n);
+  }
+  return [...m.values()];
+}
+function joinPeerClan(i){
+  const q=peerClans()[+i];
+  if(!q){toast('That clan is no longer in the game.','warn');renderClan();return;}
+  if(S.clan&&clanName()===q.name){return;}
+  S.clan={kind:'member',name:q.name,color:q.color,emblem:q.emblem,lp:q.lp};
+  computeFx();rebuildCabinFlags();renderHud();saveGame();
+  Sfx.relic(1);toast('You joined '+q.name+(q.lp?'. Legendary power: '+LEGEND_BY_ID[q.lp].name+'.':'. Your banner now flies their colours.'),'gold');
+  G.hintT=8;renderClan();
 }
 function leaveClan(){
   if(!S.clan)return;
@@ -2969,14 +3041,14 @@ function foundClan(){
   if(badWordHit(name)){toast('Please choose a friendlier clan name.','warn');return;}
   if(S.wood<8){toast('Founding a clan needs 8 wood.','warn');return;}
   S.wood-=8;
-  S.clan={kind:'own',name:name,color:OWN_COLORS[UI.found.color],emblem:UI.found.emb};
+  S.clan={kind:'own',name:name,color:OWN_COLORS[UI.found.color],emblem:UI.found.emb,lp:UI.found.lp};
   computeFx();rebuildCabinFlags();renderHud();saveGame();Sfx.build();
-  toast('The '+name+' are founded. Your banner will fly from your cabin.','gold');
+  toast('The '+name+' are founded. Legendary power: '+LEGEND_BY_ID[UI.found.lp].name+'. Every member gets it.','gold');
   G.hintT=10;renderClan();
 }
 function renderRelics(){
   const el=$('relicBody');
-  let h='<button class="btn close" data-close="1" aria-label="Close">&times;</button><h2>Relics</h2><p class="lede">Equip up to '+slotCap()+'. Satchel Knots add slots. Their properties stack with your clan perk. Relics glow in the forest and sleep in the rock below it.</p>';
+  let h='<button class="btn close" data-close="1" aria-label="Close">&times;</button><h2>Relics</h2><p class="lede">Equip up to '+slotCap()+'. Collect Satchel Knots to add slots, up to 6. Their properties stack with your clan perk. Relics glow in the forest and sleep in the rock below it.</p>';
   h+='<h3>Equipped</h3><div class="slots">';
   for(let i=0;i<slotCap();i++){
     const uid=S.equipped[i],r=uid&&S.relics.find(q=>q.uid===uid);
@@ -3001,17 +3073,17 @@ function onSheetClick(e){
   const b=t.closest&&t.closest('[data-act]');if(!b||b.disabled)return;
   const a=b.getAttribute('data-act'),i=a.indexOf(':'),k=i<0?a:a.slice(0,i),v=i<0?'':a.slice(i+1);
   if(k==='join')joinClan(v);
+  else if(k==='joinp')joinPeerClan(v);
   else if(k==='leave'){leaveClan();renderClan();}
   else if(k==='found')foundClan();
   else if(k==='sell'){sellOres();renderClan();}
   else if(k==='swatch'){const inp=$('clanName');if(inp)UI.found.name=inp.value;UI.found.color=+v;renderClan();}
+  else if(k==='lp'){const inp=$('clanName');if(inp)UI.found.name=inp.value;if(LEGEND_BY_ID[v])UI.found.lp=v;renderClan();}
   else if(k==='emb'){const inp=$('clanName');if(inp)UI.found.name=inp.value;UI.found.emb=+v;renderClan();}
   else if(k==='recall'){closePanel(true);G.mode='play';tryRecall();}
   else if(k==='equip'){
     const uid=+v,ix=S.equipped.indexOf(uid);
     if(ix>=0){
-      const rest=S.equipped.filter(q=>q!==uid);
-      if(rest.length>slotCap(rest)){toast('Unequip other powers first. You would not have room for them.','warn');return;}
       S.equipped.splice(ix,1);
     }
     else if(S.equipped.length<slotCap())S.equipped.push(uid);
@@ -3153,14 +3225,14 @@ function maskBad(s){
 function cleanName(s){const n=String(s==null?'':s).replace(/[^\w \-.']/g,'').trim().slice(0,16);return badWordHit(n)?'Wanderer':n;}
 function localState(){
   return {n:Net.name,x:+P.x.toFixed(2),y:+P.y.toFixed(2),z:+P.z.toFixed(2),r:+P.yaw.toFixed(2),u:P.ug?1:0,
-    c:S.clan?clanColor():'',k:S.clan?String(clanName()).slice(0,22):'',h:Net.host?1:0,m:Net.max};
+    c:S.clan?clanColor():'',k:S.clan?String(clanName()).slice(0,22):'',e:S.clan?clanEmblem():0,lp:(S.clan&&S.clan.lp)||'',h:Net.host?1:0,m:Net.max};
 }
 function sanePeer(p){
   if(!p||typeof p!=='object')return null;
   const x=+p.x,y=+p.y,z=+p.z,r=+p.r;
   if(!isFinite(x)||!isFinite(y)||!isFinite(z)||Math.abs(x)>1e6||Math.abs(z)>1e6||Math.abs(y)>1e5)return null;
   return {n:cleanName(p.n)||'Wanderer',x:x,y:y,z:z,r:isFinite(r)?r:0,u:p.u?1:0,
-    c:/^#[0-9a-fA-F]{6}$/.test(p.c||'')?p.c:'',k:typeof p.k==='string'&&!badWordHit(p.k)?p.k.replace(/[^\w \-.']/g,'').slice(0,22):'',h:p.h?1:0,m:Math.max(2,Math.min(8,(+p.m)|0||8))};
+    c:/^#[0-9a-fA-F]{6}$/.test(p.c||'')?p.c:'',k:typeof p.k==='string'&&!badWordHit(p.k)?p.k.replace(/[^\w \-.']/g,'').slice(0,22):'',e:Math.max(0,Math.min(5,(+p.e)|0)),lp:(typeof p.lp==='string'&&LEGEND_BY_ID[p.lp])?p.lp:'',h:p.h?1:0,m:Math.max(2,Math.min(8,(+p.m)|0||8))};
 }
 /* ---- chat ---- */
 function chatLine(name,text,sys){
@@ -3238,6 +3310,7 @@ function updateOnlineChip(){
 }
 function netCabTick(dt){
   if(!Net.sendCab)return;
+  if(Net.cabQueue&&Net.cabQueue.length){for(let k=0;k<4&&Net.cabQueue.length;k++)Net.sendCab(Net.cabQueue.shift());}
   if(CAB.rev!==Net.cabSentRev){Net.cabSentRev=CAB.rev;Net.cabV=Date.now();Net.cabDue=Math.max(Net.cabDue,0.6);}
   Net.cabT-=dt;
   if(Net.cabDue>0){Net.cabDue-=dt;if(Net.cabDue<=0){Net.cabDue=0;Net.cabT=6;
@@ -3245,13 +3318,14 @@ function netCabTick(dt){
       Net.cabEverSent=true;
       const s=cabEncode(),parts=[];for(let i=0;i<s.length;i+=3200)parts.push(s.slice(i,i+3200));
       if(!parts.length)parts.push('');
-      parts.forEach((d,i)=>Net.sendCab({v:Net.cabV,i:i,c:parts.length,d:d}));
+      Net.cabQueue=parts.map((d,i)=>({v:Net.cabV,i:i,c:parts.length,d:d}));
+      Net.cabT=Math.max(6,parts.length*1.5);
     }}}
   else if(Net.cabT<=0&&S.cabin.length){Net.cabDue=0.01;}
 }
 function netCabRecv(id,m){
   if(!m||typeof m!=='object'||typeof m.d!=='string'||m.d.length>3400)return;
-  const v=+m.v,i=m.i|0,c=m.c|0;if(!isFinite(v)||c<1||c>8||i<0||i>=c)return;
+  const v=+m.v,i=m.i|0,c=m.c|0;if(!isFinite(v)||c<1||c>200||i<0||i>=c)return;
   let e=Net.rcab.get(id);
   if(!e||v>e.v){e={v:v,c:c,parts:[],got:0,done:false};Net.rcab.set(id,e);}
   if(v!==e.v||e.done||e.c!==c||e.parts[i]!==undefined)return;
@@ -3620,7 +3694,7 @@ function loop(ts){
 
 /* ===== boot ===== */
 function resetState(){
-  Object.assign(S,{wood:8,relics:[],equipped:[],uid:1,collected:{},treehouses:[],cabin:[],hatches:[],dug:{},clan:null,discovered:{},time:0.12*DAY_LEN,found:0,sleeps:0,ores:{copper:0,iron:0,gold:0,aether:0}});
+  Object.assign(S,{wood:8,relics:[],equipped:[],slotBonus:0,uid:1,collected:{},treehouses:[],cabin:[],hatches:[],dug:{},clan:null,discovered:{},time:0.12*DAY_LEN,found:0,sleeps:0,ores:{copper:0,iron:0,gold:0,aether:0}});
   Object.assign(P,{x:6,y:3.2,z:6,vy:0,vx:0,vz:0,yaw:0.6,pitch:-0.05,onGround:false,ug:false});
 }
 function reloadWorld(){
@@ -3693,7 +3767,7 @@ $('btnMute').addEventListener('click',()=>{Sfx.setOn(!Sfx.on);$('btnMute').textC
 $('paused').addEventListener('click',e=>{if(e.target===$('paused'))resumeGame();});
 window.addEventListener('beforeunload',()=>{if(G.mode!=='menu')saveGame();});
 
-window.__hb={slotCap:slotCap,RT:RT,cabCheck:cabCheck,cabCost:cabCost,indexAdd:indexAdd,addPieceObj:addPieceObj,resolveSolids:resolveSolids,groundAt:groundAt,terrainH:terrainH,cabinPrompt:cabinPrompt,computeFx:computeFx,rebuildCabinFlags:rebuildCabinFlags,cabinNear:cabinNear,cabinPlots:cabinPlots,CAB:CAB,placePiece:placePiece,toggleBuild:toggleBuild,cabSelect:cabSelect,cabinBeds:cabinBeds,tryRecall:tryRecall,saveGame:saveGame,Net:Net,AV:AV,netStart:netStart,SKYFALLS:SKYFALLS,doInteract:doInteract,scanInteract:scanInteract,oreAt:oreAt,S:S,P:P,G:G,UG:UG,chunks:chunks,frame:frame,scene:scene,camera:camera,renderer:renderer,startGame:startGame,buildTreehouse:buildTreehouse,tryPlaceHatch:tryPlaceHatch,enterUG:enterUG,exitUG:exitUG,addHatch:addHatch,ugRebuild:ugRebuild,openPanel:openPanel,closePanel:closePanel,scanInteract:scanInteract,doInteract:doInteract,joinClan:joinClan,foundClan:foundClan,keys:keys,input:input,terrainH:terrainH,updateChunks:updateChunks,collectRelic:collectRelic,computeFx:computeFx,RELIC_TYPES:RELIC_TYPES,CLANS:CLANS,UI:UI,tryRecall:tryRecall,setMode:setMode,fx:()=>FX};
+window.__hb={collectRelic:collectRelic,slotsMaxed:slotsMaxed,getFX:()=>FX,renderClan:renderClan,peerClans:peerClans,joinPeerClan:joinPeerClan,slotCap:slotCap,RT:RT,cabCheck:cabCheck,cabCost:cabCost,indexAdd:indexAdd,addPieceObj:addPieceObj,resolveSolids:resolveSolids,groundAt:groundAt,terrainH:terrainH,cabinPrompt:cabinPrompt,computeFx:computeFx,rebuildCabinFlags:rebuildCabinFlags,cabinNear:cabinNear,cabinPlots:cabinPlots,CAB:CAB,placePiece:placePiece,toggleBuild:toggleBuild,cabSelect:cabSelect,cabinBeds:cabinBeds,tryRecall:tryRecall,saveGame:saveGame,Net:Net,AV:AV,netStart:netStart,SKYFALLS:SKYFALLS,doInteract:doInteract,scanInteract:scanInteract,oreAt:oreAt,S:S,P:P,G:G,UG:UG,chunks:chunks,frame:frame,scene:scene,camera:camera,renderer:renderer,startGame:startGame,buildTreehouse:buildTreehouse,tryPlaceHatch:tryPlaceHatch,enterUG:enterUG,exitUG:exitUG,addHatch:addHatch,ugRebuild:ugRebuild,openPanel:openPanel,closePanel:closePanel,scanInteract:scanInteract,doInteract:doInteract,joinClan:joinClan,foundClan:foundClan,keys:keys,input:input,terrainH:terrainH,updateChunks:updateChunks,collectRelic:collectRelic,computeFx:computeFx,RELIC_TYPES:RELIC_TYPES,CLANS:CLANS,UI:UI,tryRecall:tryRecall,setMode:setMode,fx:()=>FX};
 boot();
 })();
 
