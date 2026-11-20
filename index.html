@@ -245,13 +245,14 @@ body.touch .tr{top:calc(54px + env(safe-area-inset-top,0px))}
     <div><span class="kbd">WASD</span> Move</div><div><span class="kbd">Shift</span> Sprint</div>
     <div><span class="kbd">Space</span> Jump, hold to glide</div><div><span class="kbd">E</span> Act on prompt</div>
     <div><span class="kbd">T</span> Dig a tunnel entrance</div><div><span class="kbd">F</span> / click: dig</div>
-    <div><span class="kbd">C</span> Clans</div><div><span class="kbd">I</span> Relics</div>
+    <div><span class="kbd">C</span> Clans</div><div><span class="kbd">J</span> Journal</div><div><span class="kbd">I</span> Relics</div>
     <div><span class="kbd">M</span> Map</div><div><span class="kbd">R</span> Recall to your hall</div>
   </div>
   <p style="color:var(--ink-dim);font-size:12.5px;margin:0;max-width:44ch">If the mouse does not lock in this view, drag to look around.</p>
 </div>
 
 <div class="overlay sheetwrap" id="clanSheet"><div class="sheet" id="clanBody"></div></div>
+<div class="overlay sheetwrap" id="journalSheet"><div class="sheet" id="journalBody"></div></div>
 <div class="overlay sheetwrap" id="relicSheet"><div class="sheet" id="relicBody"></div></div>
 <div class="overlay sheetwrap" id="mapSheet"><div class="sheet" id="mapBody">
   <button class="btn close" data-close="1" aria-label="Close">&times;</button>
@@ -363,7 +364,7 @@ function nearCamp(x,z,r){
 
 /* ===== state ===== */
 const S={
-  wood:8,relics:[],equipped:[],slotBonus:0,uid:1,collected:{},treehouses:[],cabin:[],hatches:[],dug:{},
+  wood:8,relics:[],equipped:[],slotBonus:0,ach:{},wisps:0,mined:0,climbs:0,chests:{},fish:0,uid:1,collected:{},treehouses:[],cabin:[],hatches:[],dug:{},
   clan:null,discovered:{},time:0.12*DAY_LEN,found:0,sleeps:0,ores:{copper:0,iron:0,gold:0,aether:0}
 };
 const ORES=[
@@ -379,7 +380,7 @@ let hasSave=false;
 function saveGame(){
   if(G.mp)return;
   try{
-    const o={x:P.x,z:P.z,yaw:P.yaw,wood:S.wood,relics:S.relics,equipped:S.equipped,slotBonus:S.slotBonus|0,uid:S.uid,collected:S.collected,cabin:S.cabin.map(p=>({k:p.k,i:p.i,j:p.j,r:p.r,y:p.y})),hatches:S.hatches,dug:S.dug,clan:S.clan,discovered:S.discovered,time:S.time,found:S.found,sleeps:S.sleeps,ores:S.ores};
+    const o={x:P.x,z:P.z,yaw:P.yaw,wood:S.wood,relics:S.relics,equipped:S.equipped,slotBonus:S.slotBonus|0,ach:S.ach||{},wisps:S.wisps|0,mined:S.mined|0,climbs:S.climbs|0,chests:S.chests||{},fish:S.fish|0,uid:S.uid,collected:S.collected,cabin:S.cabin.map(p=>({k:p.k,i:p.i,j:p.j,r:p.r,y:p.y})),hatches:S.hatches,dug:S.dug,clan:S.clan,discovered:S.discovered,time:S.time,found:S.found,sleeps:S.sleeps,ores:S.ores};
     localStorage.setItem(SAVE_KEY,JSON.stringify(o));
   }catch(e){}
 }
@@ -387,9 +388,11 @@ function readSave(){
   try{const raw=localStorage.getItem(SAVE_KEY);if(!raw)return null;const o=JSON.parse(raw);return o&&typeof o==='object'?o:null;}catch(e){return null;}
 }
 function applySave(o){
-  for(const k of ['wood','relics','equipped','slotBonus','uid','collected','cabin','hatches','dug','clan','discovered','time','found','sleeps','ores']){if(o[k]!==undefined)S[k]=o[k];}
+  for(const k of ['wood','relics','equipped','slotBonus','ach','wisps','mined','climbs','chests','fish','uid','collected','cabin','hatches','dug','clan','discovered','time','found','sleeps','ores']){if(o[k]!==undefined)S[k]=o[k];}
   for(const q of ORES)if(typeof S.ores[q.id]!=='number')S.ores[q.id]=0;
   S.slotBonus=Math.max(0,Math.min(3,S.slotBonus|0));
+  if(!S.ach||typeof S.ach!=='object')S.ach={};
+  if(!S.chests||typeof S.chests!=='object')S.chests={};
   {const keep=[];for(const r of S.relics){if(r.type==='pack'){S.slotBonus=Math.min(3,S.slotBonus+Math.max(1,Math.round(2*RARITY[r.rar].pow-1)));}else keep.push(r);}
    S.relics=keep;S.equipped=S.equipped.filter(u=>keep.some(r=>r.uid===u));}
   if(Array.isArray(o.treehouses)&&o.treehouses.length){G.legacyRefund=o.treehouses.length*10;S.wood+=G.legacyRefund;}
@@ -1667,7 +1670,7 @@ function updateClimb(dt){
     P.y+=(11+2*FX.speed)*dt;
     if(P.y>=s.top){
       const dx=s.cx-s.bx,dz=s.cz-s.bz,l=Math.hypot(dx,dz)||1;
-      P.x=s.bx+dx/l*4.5;P.z=s.bz+dz/l*4.5;P.y=s.top;P.vy=0;P.onGround=true;G.climb=null;
+      P.x=s.bx+dx/l*4.5;P.z=s.bz+dz/l*4.5;P.y=s.top;P.vy=0;P.onGround=true;G.climb=null;S.climbs=(S.climbs|0)+1;
       toast('You pull yourself onto a sky island.','gold');
     }
   }else{
@@ -2094,6 +2097,204 @@ function remotePlots(){
   }
   return out;
 }
+/* ===== extras: night wisps and the Journal (achievements) ===== */
+const WISP={list:[],group:new THREE.Group(),tex:null,spawnT:0,streak:0,streakT:0,achT:0,combo:null};
+scene.add(WISP.group);
+function wispTexture(){
+  if(WISP.tex)return WISP.tex;
+  const c=document.createElement('canvas');c.width=c.height=64;const g=c.getContext('2d');
+  const gr=g.createRadialGradient(32,32,0,32,32,32);
+  gr.addColorStop(0,'rgba(255,255,255,1)');gr.addColorStop(0.18,'rgba(190,255,230,0.95)');gr.addColorStop(0.5,'rgba(110,230,200,0.35)');gr.addColorStop(1,'rgba(110,230,200,0)');
+  g.fillStyle=gr;g.fillRect(0,0,64,64);
+  WISP.tex=new THREE.CanvasTexture(c);return WISP.tex;
+}
+function spawnWisp(){
+  const a=Math.random()*Math.PI*2,d=9+Math.random()*18;
+  const x=P.x+Math.cos(a)*d,z=P.z+Math.sin(a)*d;
+  const gy=groundAt(x,z,P.y+20);
+  if(gy<WATER_Y+0.3)return;
+  const m=new THREE.SpriteMaterial({map:wispTexture(),color:Math.random()<0.15?0xffd27a:0x9ff5dc,blending:THREE.AdditiveBlending,transparent:true,depthWrite:false,opacity:0});
+  const s=new THREE.Sprite(m);const sc=1.5+Math.random()*0.8;s.scale.set(sc,sc,1);
+  const w={s:s,x:x,z:z,by:gy+1.3+Math.random()*1.4,ph:Math.random()*6.28,vx:(Math.random()-0.5)*0.6,vz:(Math.random()-0.5)*0.6,age:0,gold:m.color.getHex()===0xffd27a};
+  s.position.set(x,w.by,z);WISP.group.add(s);WISP.list.push(w);
+}
+function killWisp(w){WISP.group.remove(w.s);w.s.material.dispose();const i=WISP.list.indexOf(w);if(i>=0)WISP.list.splice(i,1);}
+function wispTick(dt,t){
+  const night=SKY_NOW.nightW>0.4&&G.mode==='play'&&!P.ug&&!G.climb;
+  const target=night?(Net.on?10:14):0;
+  WISP.spawnT-=dt;
+  if(night&&WISP.list.length<target&&WISP.spawnT<=0){spawnWisp();WISP.spawnT=0.8;}
+  if(WISP.streak>0){WISP.streakT-=dt;if(WISP.streakT<=0)WISP.streak=0;}
+  for(let i=WISP.list.length-1;i>=0;i--){
+    const w=WISP.list[i];w.age+=dt;
+    w.x+=w.vx*dt+Math.sin(t*0.7+w.ph)*0.3*dt;w.z+=w.vz*dt+Math.cos(t*0.6+w.ph)*0.3*dt;
+    const gy=groundAt(w.x,w.z,P.y+20);w.by=Math.max(w.by,gy+1.0);
+    const y=w.by+Math.sin(t*1.6+w.ph)*0.35;
+    w.s.position.set(w.x,y,w.z);
+    const want=night?Math.min(1,w.age*0.6):0;
+    w.s.material.opacity+=(want-w.s.material.opacity)*Math.min(1,dt*3);
+    const dx=P.x-w.x,dz=P.z-w.z,dy=(P.y+1.0)-y,d2=dx*dx+dz*dz+dy*dy;
+    if(night&&w.s.material.opacity>0.4&&d2<2.4){
+      const bonus=w.gold?3:1;
+      WISP.streak++;WISP.streakT=7;
+      let gain=bonus;
+      if(WISP.streak%5===0)gain+=3;
+      S.wood+=gain;S.wisps=(S.wisps|0)+1;
+      Sfx.pick();
+      toast((w.gold?'Golden wisp! ':'Wisp caught. ')+'+'+gain+' wood'+(WISP.streak>=2?'  (streak '+WISP.streak+(WISP.streak%5===0?', bonus!':'')+')':''),'gold');
+      killWisp(w);renderHud();saveGameSoon();
+      continue;
+    }
+    if(!night&&w.s.material.opacity<0.03||d2>60*60)killWisp(w);
+  }
+}
+/* ---- Journal ---- */
+const ACH=[
+  {id:'relic1',name:'First light',text:'Collect your first relic.',get:()=>S.found,goal:1,reward:5},
+  {id:'relic10',name:'Relic hunter',text:'Collect 10 relics.',get:()=>S.found,goal:10,reward:15},
+  {id:'relic25',name:'Relic keeper',text:'Collect 25 relics.',get:()=>S.found,goal:25,reward:30},
+  {id:'home',name:'Homesteader',text:'Put a bed in your cabin.',get:()=>cabinBeds(),goal:1,reward:10},
+  {id:'build40',name:'Master of logs',text:'Place 40 cabin pieces.',get:()=>S.cabin.length,goal:40,reward:15},
+  {id:'sleep3',name:'Sound sleeper',text:'Sleep 3 times.',get:()=>S.sleeps,goal:3,reward:5},
+  {id:'dig50',name:'Delver',text:'Dig out 50 tunnel blocks.',get:()=>Object.keys(S.dug).length,goal:50,reward:10},
+  {id:'ore20',name:'Prospector',text:'Mine 20 ore.',get:()=>S.mined|0,goal:20,reward:12},
+  {id:'wisp10',name:'Firefly friend',text:'Catch 10 night wisps.',get:()=>S.wisps|0,goal:10,reward:8},
+  {id:'wisp60',name:'Wisp collector',text:'Catch 60 night wisps.',get:()=>S.wisps|0,goal:60,reward:25},
+  {id:'sky1',name:'Skywalker',text:'Climb a skyfall to a sky island.',get:()=>S.climbs|0,goal:1,reward:15},
+  {id:'sky3',name:'Cloud dweller',text:'Climb 3 skyfalls.',get:()=>S.climbs|0,goal:3,reward:25},
+  {id:'clan',name:'Banner raised',text:'Found or join a clan.',get:()=>S.clan?1:0,goal:1,reward:10},
+  {id:'chest3',name:'Treasure hunter',text:'Open 3 hidden chests.',get:()=>Object.keys(S.chests||{}).length,goal:3,reward:12},
+  {id:'chest10',name:'Plunderer',text:'Open 10 hidden chests.',get:()=>Object.keys(S.chests||{}).length,goal:10,reward:30},
+  {id:'fish10',name:'Angler',text:'Catch 10 fish.',get:()=>S.fish|0,goal:10,reward:12},
+  {id:'fish40',name:'Master angler',text:'Catch 40 fish.',get:()=>S.fish|0,goal:40,reward:30},
+  {id:'slots',name:'Roomy satchel',text:'Reach 5 power slots.',get:()=>slotCap(),goal:5,reward:20}
+];
+function achTick(dt){
+  WISP.achT-=dt;if(WISP.achT>0||G.mode==='menu')return;WISP.achT=1.5;
+  if(!S.ach)S.ach={};
+  for(const a of ACH){
+    if(S.ach[a.id])continue;
+    let v=0;try{v=a.get();}catch(e){}
+    if(v>=a.goal){
+      S.ach[a.id]=true;S.wood+=a.reward;
+      Sfx.relic(1);toast('Journal: '+a.name+'. +'+a.reward+' wood.','gold');renderHud();saveGameSoon();
+    }
+  }
+}
+function renderJournal(){
+  const el=$('journalBody');if(!S.ach)S.ach={};
+  const done=ACH.filter(a=>S.ach[a.id]).length;
+  let h='<button class="btn close" data-close="1" aria-label="Close">&times;</button><h2>Journal</h2>';
+  h+='<p class="lede">Goals that pay wood. '+done+' of '+ACH.length+' complete. At night, glowing wisps drift through the forest. Walk into them for wood, and keep a streak going for bonuses.</p><div class="grid">';
+  for(const a of ACH){
+    const ok=!!S.ach[a.id];let v=0;try{v=Math.min(a.goal,a.get());}catch(e){}
+    h+='<div class="card"><h4 style="'+(ok?'color:#7fe6d6':'')+'">'+(ok?'&#10003; ':'')+esc(a.name)+'</h4><div class="meta">'+esc(a.text)+'</div><div class="meta"><b>'+(ok?'Done':v+' / '+a.goal)+'</b> &middot; reward '+a.reward+' wood</div></div>';
+  }
+  h+='</div>';
+  el.innerHTML=h;
+}
+
+
+/* ===== hidden chests ===== */
+const CHEST={cell:40,map:new Map(),geo:null,mats:null,t:0};
+function chestSpot(ci,cj){
+  if(hash2(ci,cj,777)>=0.4)return null;
+  const x=(ci+0.15+0.7*hash2(ci,cj,778))*CHEST.cell,z=(cj+0.15+0.7*hash2(ci,cj,779))*CHEST.cell;
+  if(Math.hypot(x-6,z-6)<14)return null;
+  const h=terrainH(x,z);if(h<WATER_Y+0.8)return null;
+  return {x:x,z:z,y:h,key:ci+','+cj,ci:ci,cj:cj};
+}
+function chestMesh(){
+  if(!CHEST.mats)CHEST.mats={body:new THREE.MeshToonMaterial({color:0x8a5530,gradientMap:GRAD}),band:new THREE.MeshToonMaterial({color:0xe3b341,gradientMap:GRAD}),glow:null};
+  const g=new THREE.Group();
+  const b=new THREE.Mesh(new THREE.BoxGeometry(0.9,0.5,0.6),CHEST.mats.body);b.position.y=0.25;
+  const lid=new THREE.Mesh(new THREE.CylinderGeometry(0.3,0.3,0.9,8,1,false,0,Math.PI).rotateZ(Math.PI/2).rotateY(Math.PI/2),CHEST.mats.body);lid.position.y=0.5;
+  const band=new THREE.Mesh(new THREE.BoxGeometry(0.14,0.62,0.64),CHEST.mats.band);band.position.y=0.3;
+  const sp=new THREE.Sprite(new THREE.SpriteMaterial({map:wispTexture(),color:0xffd27a,blending:THREE.AdditiveBlending,transparent:true,depthWrite:false,opacity:0.85}));
+  sp.scale.set(2.6,2.6,1);sp.position.y=0.9;
+  g.add(b,lid,band,sp);g.userData.glow=sp;
+  return g;
+}
+function chestTick(dt,t){
+  CHEST.t-=dt;if(CHEST.t>0)return;CHEST.t=0.8;
+  if(!S.chests)S.chests={};
+  const ci0=Math.floor(P.x/CHEST.cell),cj0=Math.floor(P.z/CHEST.cell);
+  const want=new Set();
+  if(!P.ug&&G.mode!=='menu'){
+    for(let a=-3;a<=3;a++)for(let b=-3;b<=3;b++){
+      const s=chestSpot(ci0+a,cj0+b);if(!s||S.chests[s.key])continue;
+      if(Math.hypot(s.x-P.x,s.z-P.z)>110)continue;
+      want.add(s.key);
+      if(!CHEST.map.has(s.key)){const m=chestMesh();m.position.set(s.x,s.y,s.z);m.rotation.y=hash2(s.ci,s.cj,780)*6.28;scene.add(m);CHEST.map.set(s.key,{m:m,s:s});}
+    }
+  }
+  for(const [k,c] of CHEST.map){if(!want.has(k)||S.chests[k]){scene.remove(c.m);CHEST.map.delete(k);}}
+}
+function chestPrompt(){
+  for(const [k,c] of CHEST.map){
+    if(S.chests[k])continue;
+    if(Math.hypot(c.s.x-P.x,c.s.z-P.z)<2.6&&Math.abs(P.y-c.s.y)<2.5){
+      return {label:'Open chest',ok:true,run:()=>openChest(k)};
+    }
+  }
+  return null;
+}
+function openChest(k){
+  const c=CHEST.map.get(k);if(!c||S.chests[k])return;
+  S.chests[k]=true;
+  const wood=6+Math.floor(hash2(c.s.ci,c.s.cj,781)*10);
+  S.wood+=wood;let msg='Chest opened. +'+wood+' wood';
+  if(hash2(c.s.ci,c.s.cj,782)<0.4){
+    const o=ORES[Math.floor(hash2(c.s.ci,c.s.cj,783)*ORES.length)],n=1+Math.floor(hash2(c.s.ci,c.s.cj,784)*3);
+    S.ores[o.id]=(S.ores[o.id]|0)+n;msg+=', '+n+' '+o.name;
+  }
+  scene.remove(c.m);CHEST.map.delete(k);
+  Sfx.relic(1);toast(msg+'.','gold');renderHud();saveGame();
+}
+/* ===== fishing ===== */
+const FISH={state:'idle',t:0,x:0,z:0,bob:null,biteAt:0};
+const FISH_TABLE=[
+  {name:'a minnow',wood:1,w:50},{name:'a bass',wood:3,w:30},{name:'a golden carp',wood:8,w:8},{name:'an old boot',wood:0,w:12}
+];
+function waterAhead(){
+  if(P.ug||G.climb||P.swim)return null;
+  for(const d of [3.5,5,6.5]){
+    const x=P.x-Math.sin(P.yaw)*d,z=P.z-Math.cos(P.yaw)*d;
+    if(terrainH(x,z)<WATER_Y-0.15&&P.y>WATER_Y-0.6)return {x:x,z:z};
+  }
+  return null;
+}
+function fishPrompt(){
+  if(FISH.state==='bite')return {label:'Reel in!',ok:true,run:reelIn};
+  if(FISH.state==='wait')return {label:'Waiting for a bite... (E to cancel)',ok:true,run:()=>endFishing('You reel the line back in.')};
+  const w=waterAhead();
+  if(!w)return null;
+  return {label:'Cast a line',ok:true,run:()=>{FISH.state='wait';FISH.x=w.x;FISH.z=w.z;FISH.t=0;FISH.biteAt=2.5+Math.random()*5;toast('You cast your line.');showBobber(true);}};
+}
+function showBobber(on){
+  if(on&&!FISH.bob){const m=new THREE.Mesh(new THREE.SphereGeometry(0.14,10,8),new THREE.MeshBasicMaterial({color:0xff5a4a}));scene.add(m);FISH.bob=m;}
+  if(FISH.bob){FISH.bob.visible=on;if(on)FISH.bob.position.set(FISH.x,WATER_Y+0.05,FISH.z);}
+}
+function endFishing(msg){FISH.state='idle';showBobber(false);if(msg)toast(msg);}
+function reelIn(){
+  let r=Math.random()*100,pick=FISH_TABLE[0];
+  for(const f of FISH_TABLE){if(r<f.w){pick=f;break;}r-=f.w;}
+  endFishing(null);
+  if(pick.wood>0){S.wood+=pick.wood;S.fish=(S.fish|0)+1;Sfx.relic(pick.wood>=8?2:0);toast('You caught '+pick.name+'. +'+pick.wood+' wood.','gold');renderHud();saveGameSoon();}
+  else toast('You hooked '+pick.name+'. Nothing else.','warn');
+}
+function fishTick(dt,t){
+  if(FISH.state==='idle')return;
+  if(G.mode!=='play'||P.ug||Math.hypot(P.x-FISH.x,P.z-FISH.z)>10){endFishing('Your line goes slack.');return;}
+  FISH.t+=dt;
+  if(FISH.state==='wait'&&FISH.t>=FISH.biteAt){FISH.state='bite';FISH.t=0;Sfx.pick();toast('A bite! Press E!','gold');}
+  else if(FISH.state==='bite'){
+    if(FISH.bob)FISH.bob.position.y=WATER_Y-0.05+Math.abs(Math.sin(t*14))*0.25;
+    if(FISH.t>1.4)endFishing('It got away.');
+  }
+}
+function funPrompt(){return chestPrompt()||fishPrompt();}
+function funTick(dt,t){wispTick(dt,t);chestTick(dt,t);fishTick(dt,t);achTick(dt);}
 
 /* ===== underground ===== */
 const UG={group:new THREE.Group(),mesh:null,cryst:null,cx:-9999,cz:-9999,dirty:true,relics:new Map(),hatchObjs:new Map(),glints:[],debris:[],sig:''};
@@ -2546,6 +2747,7 @@ function scanInteract(){
   }
   const skp=skyPrompt();if(skp)return skp;
   const cbp=cabinPrompt();if(cbp)return cbp;
+  const fnp=funPrompt();if(fnp)return fnp;
   const camp=findCamp();
   if(camp&&Math.hypot(P.x-camp.bx,P.z-camp.bz)<7.5){
     return {label:'Speak with '+camp.clan.elder+' of '+camp.clan.name,ok:true,run:()=>{G.clanFocus=camp.clan.id;openPanel('clan');}};
@@ -2672,7 +2874,7 @@ function updateDig(dt){
     S.dug[key]=1;
     if(ot){
       const n=1+(hash2(tg.ix,tg.iz,560)<0.5?1:0)+(hash2(tg.ix,tg.iz,561)<0.2?1:0);
-      S.ores[ot]=(S.ores[ot]|0)+n;
+      S.ores[ot]=(S.ores[ot]|0)+n;S.mined=(S.mined|0)+n;
       toast('Mined '+n+' '+ORE_BY[ot].name+'.','gold');Sfx.relic(0);renderHud();
     }
     spawnDebris(cellC(tg.ix),UG_Y+1.2,cellC(tg.iz));Sfx.dig();
@@ -2926,7 +3128,7 @@ function renderBigMap(){
 }
 
 /* ===== panels ===== */
-const panels={clan:$('clanSheet'),relics:$('relicSheet'),map:$('mapSheet')};
+const panels={clan:$('clanSheet'),relics:$('relicSheet'),map:$('mapSheet'),journal:$('journalSheet')};
 function drawEmblemCanvases(root){
   root.querySelectorAll('canvas[data-emb]').forEach(cv=>{
     const g=cv.getContext('2d');g.clearRect(0,0,cv.width,cv.height);
@@ -2940,7 +3142,7 @@ function openPanel(name){
   for(const k in keys)keys[k]=false;input.dig=false;
   try{if(document.exitPointerLock)document.exitPointerLock();}catch(e){}
   panels[name].classList.add('on');$('paused').classList.remove('on');
-  if(name==='clan')renderClan();else if(name==='relics')renderRelics();else renderBigMap();
+  if(name==='clan')renderClan();else if(name==='relics')renderRelics();else if(name==='journal')renderJournal();else renderBigMap();
 }
 function closePanel(noLock){
   for(const k in panels)panels[k].classList.remove('on');
@@ -3130,6 +3332,7 @@ window.addEventListener('keydown',e=>{
     case 'KeyC':togglePanel('clan');break;
     case 'KeyI':togglePanel('relics');break;
     case 'KeyM':togglePanel('map');break;
+    case 'KeyJ':togglePanel('journal');break;
     case 'KeyE':doInteract();break;
     case 'KeyT':tryPlaceHatch();break;
     case 'KeyR':tryRecall();break;
@@ -3580,7 +3783,7 @@ function frame(dt){
   const t=performance.now()/1000;
   skyTick(t,dt,playing&&!G.busy);
   netTick(dt,t);
-  cabinTick(dt,t);
+  cabinTick(dt,t);funTick(dt,t);
   /* mode specific world updates */
   if(!P.ug){
     const pending=updateChunks(false);
@@ -3694,7 +3897,7 @@ function loop(ts){
 
 /* ===== boot ===== */
 function resetState(){
-  Object.assign(S,{wood:8,relics:[],equipped:[],slotBonus:0,uid:1,collected:{},treehouses:[],cabin:[],hatches:[],dug:{},clan:null,discovered:{},time:0.12*DAY_LEN,found:0,sleeps:0,ores:{copper:0,iron:0,gold:0,aether:0}});
+  Object.assign(S,{wood:8,relics:[],equipped:[],slotBonus:0,ach:{},wisps:0,mined:0,climbs:0,chests:{},fish:0,uid:1,collected:{},treehouses:[],cabin:[],hatches:[],dug:{},clan:null,discovered:{},time:0.12*DAY_LEN,found:0,sleeps:0,ores:{copper:0,iron:0,gold:0,aether:0}});
   Object.assign(P,{x:6,y:3.2,z:6,vy:0,vx:0,vz:0,yaw:0.6,pitch:-0.05,onGround:false,ug:false});
 }
 function reloadWorld(){
@@ -3767,7 +3970,7 @@ $('btnMute').addEventListener('click',()=>{Sfx.setOn(!Sfx.on);$('btnMute').textC
 $('paused').addEventListener('click',e=>{if(e.target===$('paused'))resumeGame();});
 window.addEventListener('beforeunload',()=>{if(G.mode!=='menu')saveGame();});
 
-window.__hb={collectRelic:collectRelic,slotsMaxed:slotsMaxed,getFX:()=>FX,renderClan:renderClan,peerClans:peerClans,joinPeerClan:joinPeerClan,slotCap:slotCap,RT:RT,cabCheck:cabCheck,cabCost:cabCost,indexAdd:indexAdd,addPieceObj:addPieceObj,resolveSolids:resolveSolids,groundAt:groundAt,terrainH:terrainH,cabinPrompt:cabinPrompt,computeFx:computeFx,rebuildCabinFlags:rebuildCabinFlags,cabinNear:cabinNear,cabinPlots:cabinPlots,CAB:CAB,placePiece:placePiece,toggleBuild:toggleBuild,cabSelect:cabSelect,cabinBeds:cabinBeds,tryRecall:tryRecall,saveGame:saveGame,Net:Net,AV:AV,netStart:netStart,SKYFALLS:SKYFALLS,doInteract:doInteract,scanInteract:scanInteract,oreAt:oreAt,S:S,P:P,G:G,UG:UG,chunks:chunks,frame:frame,scene:scene,camera:camera,renderer:renderer,startGame:startGame,buildTreehouse:buildTreehouse,tryPlaceHatch:tryPlaceHatch,enterUG:enterUG,exitUG:exitUG,addHatch:addHatch,ugRebuild:ugRebuild,openPanel:openPanel,closePanel:closePanel,scanInteract:scanInteract,doInteract:doInteract,joinClan:joinClan,foundClan:foundClan,keys:keys,input:input,terrainH:terrainH,updateChunks:updateChunks,collectRelic:collectRelic,computeFx:computeFx,RELIC_TYPES:RELIC_TYPES,CLANS:CLANS,UI:UI,tryRecall:tryRecall,setMode:setMode,fx:()=>FX};
+window.__hb={terrainH:terrainH,CHEST:CHEST,FISH:FISH,fishPrompt:fishPrompt,chestPrompt:chestPrompt,SKY_NOW:SKY_NOW,DAY_LEN:DAY_LEN,updateSky:updateSky,WISP:WISP,renderJournal:renderJournal,ACH:ACH,collectRelic:collectRelic,slotsMaxed:slotsMaxed,getFX:()=>FX,renderClan:renderClan,peerClans:peerClans,joinPeerClan:joinPeerClan,slotCap:slotCap,RT:RT,cabCheck:cabCheck,cabCost:cabCost,indexAdd:indexAdd,addPieceObj:addPieceObj,resolveSolids:resolveSolids,groundAt:groundAt,terrainH:terrainH,cabinPrompt:cabinPrompt,computeFx:computeFx,rebuildCabinFlags:rebuildCabinFlags,cabinNear:cabinNear,cabinPlots:cabinPlots,CAB:CAB,placePiece:placePiece,toggleBuild:toggleBuild,cabSelect:cabSelect,cabinBeds:cabinBeds,tryRecall:tryRecall,saveGame:saveGame,Net:Net,AV:AV,netStart:netStart,SKYFALLS:SKYFALLS,doInteract:doInteract,scanInteract:scanInteract,oreAt:oreAt,S:S,P:P,G:G,UG:UG,chunks:chunks,frame:frame,scene:scene,camera:camera,renderer:renderer,startGame:startGame,buildTreehouse:buildTreehouse,tryPlaceHatch:tryPlaceHatch,enterUG:enterUG,exitUG:exitUG,addHatch:addHatch,ugRebuild:ugRebuild,openPanel:openPanel,closePanel:closePanel,scanInteract:scanInteract,doInteract:doInteract,joinClan:joinClan,foundClan:foundClan,keys:keys,input:input,terrainH:terrainH,updateChunks:updateChunks,collectRelic:collectRelic,computeFx:computeFx,RELIC_TYPES:RELIC_TYPES,CLANS:CLANS,UI:UI,tryRecall:tryRecall,setMode:setMode,fx:()=>FX};
 boot();
 })();
 
